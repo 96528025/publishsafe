@@ -1,8 +1,40 @@
 # PublishSafe
 
-PublishSafe is a hackathon MVP for privacy-preserving social video publishing.
-It detects and tracks people, keeps the selected creator visible, and protects
-everyone else with a moving mascot or blur.
+**Privacy-preserving video publishing for creators.**
+
+PublishSafe detects and tracks people, keeps the selected creator visible, and
+blurs everyone else along their body masks. Video stays on the machine running
+PublishSafe.
+
+![PublishSafe original and processed video comparison](docs/demo.gif)
+
+Left: original public sample. Right: one person preserved while other people
+are protected.
+
+## Quick start with Docker
+
+Requirements: [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+
+![PublishSafe Docker quick start](docs/install.gif)
+
+```bash
+git clone https://github.com/YOUR_USERNAME/publishsafe.git
+cd publishsafe
+./scripts/start.sh
+```
+
+Open `http://localhost:5173`.
+
+The first start builds the containers and downloads the YOLO segmentation
+weights, so it takes longer than later starts.
+
+```bash
+# Follow startup and processing logs
+docker compose logs -f
+
+# Stop PublishSafe
+./scripts/stop.sh
+```
 
 ## What it does
 
@@ -17,6 +49,10 @@ everyone else with a moving mascot or blur.
 
 The default privacy rule is **protect everyone except the selected creator**.
 Uploads and outputs stay in local `uploads/` and `outputs/` directories.
+
+## Architecture
+
+![PublishSafe architecture](docs/architecture.svg)
 
 ## Project structure
 
@@ -35,7 +71,7 @@ publishsafe/
 └── uploads/
 ```
 
-## Setup
+## Run from source
 
 Requirements:
 
@@ -55,8 +91,6 @@ cd frontend && npm install && cd ..
 The first backend start downloads the open-source YOLOv8 nano segmentation
 weights (`yolov8n-seg.pt`). No model is trained by this project.
 
-## Run
-
 Terminal 1:
 
 ```bash
@@ -74,7 +108,19 @@ npm run dev
 Open `http://localhost:5173`. API documentation is available at
 `http://localhost:8000/docs`.
 
-## Fast testing
+## Sample video
+
+Generate a small public sample video based on the Ultralytics bus image:
+
+```bash
+./scripts/download_sample.sh
+```
+
+Upload `samples/publishsafe-sample.mp4` through the UI.
+
+The download is optional and requires `curl` and `ffmpeg`.
+
+## Fast testing with your own video
 
 Use a short, low-resolution clip while tuning blur or tracking:
 
@@ -91,6 +137,51 @@ To test a specific section, pass the start time and duration in seconds:
 The script creates a 960x540, 15 FPS clip in `test-clips/`. Upload that clip
 through the normal UI. Five seconds is about 75 frames and processes much
 faster than a full 4K video.
+
+## Troubleshooting
+
+### Docker starts, but the page is unavailable
+
+```bash
+docker compose ps
+docker compose logs -f
+```
+
+Wait until the backend health check passes. The first model download may take
+several minutes.
+
+### Port 5173 is already in use
+
+Stop another local Vite/PublishSafe process, or change the frontend mapping in
+`docker-compose.yml`:
+
+```yaml
+ports:
+  - "8080:80"
+```
+
+Then open `http://localhost:8080`.
+
+### Processing remains at 99%
+
+Frame processing has finished and FFmpeg is encoding H.264 and restoring
+audio. Large 4K videos can spend noticeable time in this final stage.
+
+### Docker runs out of memory
+
+Increase Docker Desktop's memory allocation. PyTorch and Ultralytics are large
+dependencies. Testing with a 720p or 1080p clip also reduces memory pressure.
+
+### Person IDs switch during a crossing
+
+PublishSafe uses ByteTrack plus clothing appearance recovery, but long
+occlusions and similar outfits can still cause errors. Try a clearer preview
+frame or open an issue with a reproducible, non-sensitive sample.
+
+### Apple Silicon GPU is not used in Docker
+
+The Docker setup currently uses CPU inference for portability. Running from
+source on macOS is the path for future MPS acceleration work.
 
 ## Performance and quality
 
@@ -190,6 +281,17 @@ The most practical next performance iteration is:
 
 Keep the current every-frame, original-resolution workflow as an `Original`
 quality option so speed improvements do not remove the quality-first baseline.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Do not attach
+private or identifying videos to issues or pull requests.
+
+## License
+
+PublishSafe is licensed under the
+[GNU Affero General Public License v3.0](LICENSE), consistent with its
+Ultralytics dependency.
 
 ## API
 

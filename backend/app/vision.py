@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 import cv2
@@ -18,8 +19,9 @@ class PersonDetector:
             raise RuntimeError(
                 "ultralytics is not installed. Run: pip install -r backend/requirements.txt"
             ) from exc
-        logger.info("Loading YOLOv8 nano person segmentation model")
-        self.model = YOLO("yolov8n-seg.pt")
+        model_path = os.getenv("YOLO_MODEL_PATH", "yolov8n-seg.pt")
+        logger.info("Loading YOLOv8 nano person segmentation model: %s", model_path)
+        self.model = YOLO(model_path)
 
     def detect(self, frame: np.ndarray) -> list[tuple[tuple[int, int, int, int], float]]:
         results = self.model.predict(
