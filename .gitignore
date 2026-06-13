@@ -9,3 +9,5 @@ uploads/*
 outputs/*
 !outputs/.gitkeep
 yolov8n.pt
+test-clips/*
+!test-clips/.gitkeep
