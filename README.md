@@ -1,5 +1,7 @@
 # PublishSafe
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 **Privacy-preserving video publishing for creators.**
 
 PublishSafe detects and tracks people, keeps the selected creator visible, and
