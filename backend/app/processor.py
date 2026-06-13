@@ -43,6 +43,8 @@ def process_video(
     selected_track_id: int,
     mode: str,
     avatar_style: str,
+    blur_strength: str,
+    process_scope: str,
     detector: PersonDetector,
 ) -> None:
     capture = None
@@ -57,14 +59,22 @@ def process_video(
         fps = capture.get(cv2.CAP_PROP_FPS) or 30.0
         width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        frame_count = max(1, int(capture.get(cv2.CAP_PROP_FRAME_COUNT)))
-        temporary = OUTPUT_DIR / f"{video_id}_silent.mp4"
-        output = OUTPUT_DIR / f"{video_id}_protected.mp4"
+        source_frame_count = max(1, int(capture.get(cv2.CAP_PROP_FRAME_COUNT)))
+        frame_limit = min(source_frame_count, max(1, int(fps * 10)))
+        frame_count = frame_limit if process_scope == "preview" else source_frame_count
+        suffix = "preview" if process_scope == "preview" else "protected"
+        temporary = OUTPUT_DIR / f"{video_id}_{suffix}_silent.mp4"
+        output = OUTPUT_DIR / f"{video_id}_{suffix}.mp4"
+        output_width, output_height = width, height
+        if process_scope == "preview" and width > 1280:
+            scale = 1280 / width
+            output_width = 1280
+            output_height = int(height * scale) // 2 * 2
         writer = cv2.VideoWriter(
             str(temporary),
             cv2.VideoWriter_fourcc(*"mp4v"),
             fps,
-            (width, height),
+            (output_width, output_height),
         )
         if not writer.isOpened():
             raise RuntimeError("Could not create the output video")
@@ -76,6 +86,8 @@ def process_video(
         creator_appearance: np.ndarray | None = None
 
         while True:
+            if frame_number >= frame_count:
+                break
             ok, frame = capture.read()
             if not ok:
                 break
@@ -126,9 +138,15 @@ def process_video(
                 if track.track_id == creator_track_id:
                     continue
                 if mode == "blur":
-                    blur_person(frame, track.bbox)
+                    blur_person(frame, track.bbox, blur_strength)
                 else:
                     overlay_avatar(frame, track.bbox, avatar)
+            if (output_width, output_height) != (width, height):
+                frame = cv2.resize(
+                    frame,
+                    (output_width, output_height),
+                    interpolation=cv2.INTER_AREA,
+                )
             writer.write(frame)
             frame_number += 1
 
@@ -147,6 +165,15 @@ def process_video(
 
         # OpenCV does not preserve audio. Reattach it when ffmpeg is available.
         if shutil.which("ffmpeg"):
+            set_job(
+                job_id,
+                progress=99,
+                message=(
+                    "Finalizing 10-second preview"
+                    if process_scope == "preview"
+                    else "Finalizing video and audio"
+                ),
+            )
             command = [
                 "ffmpeg", "-y", "-i", str(temporary), "-i", str(source),
                 "-map", "0:v:0", "-map", "1:a:0?", "-c:v", "libx264",
@@ -166,8 +193,13 @@ def process_video(
             job_id,
             status="complete",
             progress=100,
-            message="Your privacy-safe video is ready",
+            message=(
+                "Your 10-second preview is ready"
+                if process_scope == "preview"
+                else "Your privacy-safe video is ready"
+            ),
             output_url=f"/outputs/{output.name}",
+            process_scope=process_scope,
         )
     except Exception as exc:
         logger.exception("Video processing failed for job %s", job_id)
@@ -179,7 +211,7 @@ def process_video(
             capture.release()
 
 
-def create_job() -> str:
+def create_job(process_scope: str = "full") -> str:
     job_id = uuid.uuid4().hex
     with jobs_lock:
         jobs[job_id] = {
@@ -188,5 +220,6 @@ def create_job() -> str:
             "progress": 0,
             "message": "Waiting to process",
             "output_url": None,
+            "process_scope": process_scope,
         }
     return job_id

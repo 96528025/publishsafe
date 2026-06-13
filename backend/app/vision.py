@@ -154,7 +154,11 @@ def overlay_avatar(frame: np.ndarray, bbox: tuple[int, int, int, int], avatar: n
     ).astype(np.uint8)
 
 
-def blur_person(frame: np.ndarray, bbox: tuple[int, int, int, int]) -> None:
+def blur_person(
+    frame: np.ndarray,
+    bbox: tuple[int, int, int, int],
+    strength: str = "strong",
+) -> None:
     height, width = frame.shape[:2]
     x1, y1, x2, y2 = bbox
     padding_x = int((x2 - x1) * 0.08)
@@ -164,6 +168,11 @@ def blur_person(frame: np.ndarray, bbox: tuple[int, int, int, int]) -> None:
     x1, y1, x2, y2 = max(0, x1), max(0, y1), min(width, x2), min(height, y2)
     region = frame[y1:y2, x1:x2]
     if region.size == 0:
+        return
+
+    if strength == "standard":
+        kernel = max(21, (min(region.shape[:2]) // 7) | 1)
+        frame[y1:y2, x1:x2] = cv2.GaussianBlur(region, (kernel, kernel), 0)
         return
 
     region_height, region_width = region.shape[:2]

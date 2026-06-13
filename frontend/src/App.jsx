@@ -3,11 +3,13 @@ import {
   Check,
   Download,
   Eye,
+  Gauge,
   Image,
   LoaderCircle,
   LockKeyhole,
   ShieldCheck,
   Sparkles,
+  Timer,
   Upload,
   Users,
 } from "lucide-react";
@@ -25,12 +27,14 @@ function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [avatar, setAvatar] = useState("sunny");
   const [mode, setMode] = useState("avatar");
+  const [blurStrength, setBlurStrength] = useState("strong");
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState(null);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
 
-  const stage = job?.status === "complete" ? 3 : upload ? 2 : 1;
+  const stage = job?.status === "complete" && job.process_scope === "full" ? 3 : upload ? 2 : 1;
+  const processing = job && !["complete", "failed"].includes(job.status);
   const people = upload?.people || [];
   const selectedPerson = useMemo(
     () => people.find((person) => person.track_id === selectedId),
@@ -74,7 +78,7 @@ function App() {
     }
   }
 
-  async function processVideo() {
+  async function processVideo(processScope = "full") {
     if (!selectedId) {
       setError("Select the person who should remain visible.");
       return;
@@ -90,6 +94,8 @@ function App() {
           selected_track_id: selectedId,
           avatar_style: avatar,
           mode,
+          blur_strength: blurStrength,
+          process_scope: processScope,
         }),
       });
       const data = await response.json();
@@ -181,7 +187,7 @@ function App() {
           </section>
         )}
 
-        {upload && job?.status !== "complete" && (
+        {upload && !(job?.status === "complete" && job.process_scope === "full") && (
           <section className="workspace">
             <div className="preview-panel">
               <div className="panel-heading">
@@ -261,6 +267,27 @@ function App() {
                 </div>
               )}
 
+              {mode === "blur" && (
+                <div className="strength-options">
+                  <button
+                    className={blurStrength === "standard" ? "selected" : ""}
+                    onClick={() => setBlurStrength("standard")}
+                  >
+                    <span className="strength-icon"><Eye size={18} /></span>
+                    <span><strong>Standard blur</strong><small>Softer, keeps more motion detail</small></span>
+                    {blurStrength === "standard" && <Check size={15} />}
+                  </button>
+                  <button
+                    className={blurStrength === "strong" ? "selected" : ""}
+                    onClick={() => setBlurStrength("strong")}
+                  >
+                    <span className="strength-icon"><Gauge size={18} /></span>
+                    <span><strong>Strong blur</strong><small>Maximum identity protection</small></span>
+                    {blurStrength === "strong" && <Check size={15} />}
+                  </button>
+                </div>
+              )}
+
               <div className="privacy-summary">
                 <ShieldCheck size={22} />
                 <div>
@@ -276,14 +303,27 @@ function App() {
                 </div>
               )}
 
-              <button
-                className="primary process"
-                disabled={!selectedId || busy || (job && !["failed"].includes(job.status))}
-                onClick={processVideo}
-              >
-                {job && job.status !== "failed" ? <><LoaderCircle className="spin" size={19} /> Processing safely</> : <><Sparkles size={19} /> Create protected video</>}
-              </button>
-              <p className="fine-print">Processing time depends on video length and your computer.</p>
+              <div className="process-actions">
+                <button
+                  className="secondary process"
+                  disabled={!selectedId || busy || processing}
+                  onClick={() => processVideo("preview")}
+                >
+                  {processing && job.process_scope === "preview"
+                    ? <><LoaderCircle className="spin" size={18} /> Creating preview</>
+                    : <><Timer size={18} /> Preview first 10 seconds</>}
+                </button>
+                <button
+                  className="primary process"
+                  disabled={!selectedId || busy || processing}
+                  onClick={() => processVideo("full")}
+                >
+                  {processing && job.process_scope === "full"
+                    ? <><LoaderCircle className="spin" size={19} /> Processing full video</>
+                    : <><Sparkles size={19} /> Process full video</>}
+                </button>
+              </div>
+              <p className="fine-print">Test the first 10 seconds before committing to the full video.</p>
             </aside>
           </section>
         )}
@@ -291,15 +331,31 @@ function App() {
         {job?.status === "complete" && (
           <section className="complete-card">
             <div className="complete-icon"><Check size={34} /></div>
-            <span className="section-label">Ready to share</span>
-            <h2>Your protected video is ready</h2>
-            <p>You stay visible. Everyone else follows your selected privacy style.</p>
+            <span className="section-label">
+              {job.process_scope === "preview" ? "Effect preview" : "Ready to share"}
+            </span>
+            <h2>
+              {job.process_scope === "preview"
+                ? "How does this protection look?"
+                : "Your protected video is ready"}
+            </h2>
+            <p>
+              {job.process_scope === "preview"
+                ? "Review the first 10 seconds. You can adjust the style or process the full video."
+                : "You stay visible. Everyone else follows your selected privacy style."}
+            </p>
             <video controls src={`${API}${job.output_url}`} />
             <div className="complete-actions">
               <a className="primary" href={`${API}${job.output_url}`} download>
-                <Download size={18} /> Download MP4
+                <Download size={18} /> Download {job.process_scope === "preview" ? "preview" : "MP4"}
               </a>
-              <button className="secondary" onClick={reset}>Protect another video</button>
+              {job.process_scope === "preview" ? (
+                <button className="primary" onClick={() => processVideo("full")}>
+                  <Sparkles size={18} /> Looks good, process full video
+                </button>
+              ) : (
+                <button className="secondary" onClick={reset}>Protect another video</button>
+              )}
             </div>
           </section>
         )}

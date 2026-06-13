@@ -25,6 +25,8 @@ class ProcessRequest(BaseModel):
     selected_track_id: int = Field(ge=1)
     mode: Literal["avatar", "blur"] = "avatar"
     avatar_style: Literal["sunny", "cosmo", "bloom"] = "sunny"
+    blur_strength: Literal["standard", "strong"] = "strong"
+    process_scope: Literal["preview", "full"] = "full"
 
 
 class JobResponse(BaseModel):
@@ -33,3 +35,4 @@ class JobResponse(BaseModel):
     progress: int
     message: str
     output_url: str | None = None
+    process_scope: Literal["preview", "full"] = "full"
