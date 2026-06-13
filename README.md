@@ -90,6 +90,105 @@ The script creates a 960x540, 15 FPS clip in `test-clips/`. Upload that clip
 through the normal UI. Five seconds is about 75 frames and processes much
 faster than a full 4K video.
 
+## Performance and quality
+
+The current full-video pipeline is the **quality-first baseline**:
+
+- It processes every source frame with YOLO and ByteTrack.
+- It preserves the source resolution and frame rate in the rendered video.
+- It uses the full tracking history instead of intentionally skipping frames.
+- It encodes a browser-compatible H.264 MP4 and restores the source audio.
+
+This makes the current version slow on 4K or high-FPS footage, but it avoids
+deliberately reducing temporal coverage or output resolution. It is the
+highest-quality mode currently implemented in PublishSafe, not a guarantee of
+perfect results. Detection can still fail for small people, motion blur, long
+occlusions, or people with similar clothing.
+
+Approximate work scales with:
+
+```text
+video duration x source FPS x per-frame detection/rendering cost
+```
+
+For example, 10 seconds at 30 FPS contains about 300 frames, while one minute
+at 60 FPS contains about 3,600 frames.
+
+### Future optimization options
+
+1. **Generate a proxy video after upload**
+
+   Convert 4K footage to a 720p or 1080p working copy for detection, tracking,
+   and previews. This should provide one of the largest speed improvements.
+   Bounding boxes can later be scaled back to the original video. Tradeoff:
+   very small or distant people may be harder to detect.
+
+2. **Use Apple GPU acceleration**
+
+   Run PyTorch/YOLO on the Apple Silicon `MPS` device when available instead of
+   CPU-only inference. This may substantially improve model speed. It requires
+   compatibility and memory testing on the target Mac.
+
+3. **Detect every second or third frame**
+
+   Run YOLO less frequently and use ByteTrack, interpolation, or optical flow
+   for frames between detections. This can remove 50-67% of detector calls.
+   Tradeoff: fast movement, brief appearances, and crossings may be less
+   accurate.
+
+4. **Reduce YOLO input size**
+
+   Lower `imgsz` from 640 to 512 or 416 for preview/fast modes. Tradeoff:
+   reduced accuracy for small or distant people.
+
+5. **Add output quality presets**
+
+   Offer modes such as:
+
+   ```text
+   Fast:      720p / 15 FPS
+   Balanced:  1080p / 30 FPS
+   Original:  source resolution / source FPS
+   ```
+
+   This lets users choose processing speed versus output fidelity.
+
+6. **Use Apple VideoToolbox encoding**
+
+   Replace CPU `libx264` encoding with `h264_videotoolbox` when available.
+   This primarily reduces the final 99% encoding/audio-merging wait. Tradeoff:
+   hardware encoding can produce different quality or file sizes at equivalent
+   settings.
+
+7. **Cache detection and tracking results**
+
+   Persist per-frame boxes and track IDs. A full render can then reuse the
+   first 10 seconds already analyzed for the effect preview, and users can
+   change avatar/blur styles without rerunning YOLO. This improves repeated
+   renders without sacrificing detection quality, at the cost of additional
+   cache storage and implementation complexity.
+
+8. **Evaluate newer lightweight detectors**
+
+   Benchmark YOLO11n or another small person detector against YOLOv8n using the
+   same videos. A newer model is not automatically faster or more accurate, so
+   it should only replace the baseline after measured comparison.
+
+### Recommended optimization order
+
+The most practical next performance iteration is:
+
+```text
+1080p proxy detection
+-> MPS acceleration
+-> cached tracking results
+-> VideoToolbox encoding
+-> optional frame skipping in Fast mode
+```
+
+Keep the current every-frame, original-resolution workflow as an `Original`
+quality option so speed improvements do not remove the quality-first baseline.
+
 ## API
 
 - `POST /api/upload`: validate, store, analyze, and create a preview
