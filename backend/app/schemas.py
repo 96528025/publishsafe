@@ -25,7 +25,7 @@ class ProcessRequest(BaseModel):
     selected_track_id: int = Field(ge=1)
     mode: Literal["avatar", "blur"] = "avatar"
     avatar_style: Literal["sunny", "cosmo", "bloom"] = "sunny"
-    blur_strength: Literal["standard", "strong"] = "strong"
+    blur_strength: int = Field(default=40, ge=10, le=100)
     process_scope: Literal["preview", "full"] = "full"
 
 
