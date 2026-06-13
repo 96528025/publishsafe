@@ -58,7 +58,7 @@ app.mount("/avatars", StaticFiles(directory=AVATAR_DIR), name="avatars")
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "model": "yolov8n", "tracker": "bytetrack"}
+    return {"status": "ok", "model": "yolov8n-seg", "tracker": "bytetrack"}
 
 
 @app.post("/api/upload", response_model=UploadResponse)
@@ -121,6 +121,10 @@ async def upload_video(file: UploadFile = File(...)) -> UploadResponse:
     people_data = [
         (track.track_id, track.bbox, track.confidence) for track in tracks
     ]
+    for track in tracks:
+        if track.mask is not None:
+            mask_path = UPLOAD_DIR / f"{video_id}_preview_mask_{track.track_id}.png"
+            cv2.imwrite(str(mask_path), track.mask * 255)
     raw_preview_path = UPLOAD_DIR / f"{video_id}_preview_raw.jpg"
     cv2.imwrite(str(raw_preview_path), frame)
     preview = draw_preview(frame, people_data)
@@ -165,7 +169,13 @@ def create_frame_preview(request: FramePreviewRequest) -> FramePreviewResponse:
     for person in request.people:
         if person.track_id == request.selected_track_id:
             continue
-        blur_person(frame, tuple(person.bbox), request.blur_strength)
+        mask_path = (
+            UPLOAD_DIR / f"{request.video_id}_preview_mask_{person.track_id}.png"
+        )
+        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        if mask is not None:
+            mask = (mask > 127).astype("uint8")
+        blur_person(frame, tuple(person.bbox), request.blur_strength, mask)
 
     output_path = (
         UPLOAD_DIR

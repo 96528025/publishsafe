@@ -7,7 +7,7 @@ everyone else with a moving mascot or blur.
 ## What it does
 
 1. Upload an MP4, MOV, AVI, MKV, or WebM video.
-2. YOLOv8n detects people and ByteTrack assigns stable IDs.
+2. YOLOv8n-seg detects person masks and ByteTrack assigns stable IDs.
 3. Select yourself from an annotated preview.
 4. Choose a mascot or adjust anonymizing blur on a 10-100 strength slider.
    The selected creator and blur strength are shown immediately on one frame.
@@ -27,7 +27,7 @@ publishsafe/
 │   │   ├── main.py       # FastAPI routes and upload analysis
 │   │   ├── processor.py  # Background video processing jobs
 │   │   ├── tracker.py    # Small fallback tracking utilities
-│   │   └── vision.py     # YOLO detection and privacy rendering
+│   │   └── vision.py     # YOLO segmentation and privacy rendering
 │   └── requirements.txt
 ├── frontend/             # Vite + React UI
 ├── outputs/
@@ -51,8 +51,8 @@ pip install -r backend/requirements.txt
 cd frontend && npm install && cd ..
 ```
 
-The first backend start downloads the open-source YOLOv8 nano weights
-(`yolov8n.pt`). No model is trained by this project.
+The first backend start downloads the open-source YOLOv8 nano segmentation
+weights (`yolov8n-seg.pt`). No model is trained by this project.
 
 ## Run
 
@@ -200,7 +200,9 @@ quality option so speed improvements do not remove the quality-first baseline.
 
 ## MVP notes
 
-- Bounding boxes are intentionally used instead of segmentation.
+- Blur mode uses instance-segmentation masks, with mask dilation and feathered
+  edges so the background remains clear. It falls back to a bounding box if a
+  mask is unavailable on a frame.
 - Tracking uses ByteTrack with a longer occlusion buffer. A clothing-appearance
   fallback recovers the selected creator when IDs switch during crossings.
 - Processing is serialized around the YOLO model for demo reliability.

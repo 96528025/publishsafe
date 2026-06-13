@@ -18,8 +18,8 @@ class PersonDetector:
             raise RuntimeError(
                 "ultralytics is not installed. Run: pip install -r backend/requirements.txt"
             ) from exc
-        logger.info("Loading YOLOv8 nano person detector")
-        self.model = YOLO("yolov8n.pt")
+        logger.info("Loading YOLOv8 nano person segmentation model")
+        self.model = YOLO("yolov8n-seg.pt")
 
     def detect(self, frame: np.ndarray) -> list[tuple[tuple[int, int, int, int], float]]:
         results = self.model.predict(
@@ -52,11 +52,18 @@ class PersonDetector:
         track_ids = boxes.id.int().tolist()
         coordinates = boxes.xyxy.int().tolist()
         confidences = boxes.conf.tolist()
+        masks = results[0].masks
+        mask_data = (
+            (masks.data.cpu().numpy() > 0.5).astype(np.uint8)
+            if masks is not None
+            else None
+        )
         return [
             Track(
                 track_id=track_id,
                 bbox=tuple(coordinates[index]),
                 confidence=float(confidences[index]),
+                mask=mask_data[index] if mask_data is not None else None,
             )
             for index, track_id in enumerate(track_ids)
         ]
@@ -158,6 +165,7 @@ def blur_person(
     frame: np.ndarray,
     bbox: tuple[int, int, int, int],
     strength: int = 40,
+    mask: np.ndarray | None = None,
 ) -> None:
     height, width = frame.shape[:2]
     x1, y1, x2, y2 = bbox
@@ -192,7 +200,30 @@ def blur_person(
 
     kernel = int(11 + min(region.shape[:2]) * (0.08 + 0.34 * normalized))
     kernel = min(151, max(15, kernel | 1))
-    frame[y1:y2, x1:x2] = cv2.GaussianBlur(anonymized, (kernel, kernel), 0)
+    anonymized = cv2.GaussianBlur(anonymized, (kernel, kernel), 0)
+
+    if mask is None:
+        frame[y1:y2, x1:x2] = anonymized
+        return
+
+    full_mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST)
+    mask_region = full_mask[y1:y2, x1:x2]
+    dilation = max(3, int(min(region.shape[:2]) * 0.025)) | 1
+    mask_region = cv2.dilate(
+        mask_region,
+        np.ones((dilation, dilation), dtype=np.uint8),
+        iterations=1,
+    )
+    feather = max(5, int(min(region.shape[:2]) * 0.018)) | 1
+    alpha = cv2.GaussianBlur(
+        mask_region.astype(np.float32),
+        (feather, feather),
+        0,
+    )[..., None]
+    alpha = np.clip(alpha, 0.0, 1.0)
+    frame[y1:y2, x1:x2] = (
+        alpha * anonymized + (1.0 - alpha) * region
+    ).astype(np.uint8)
 
 
 def load_avatar(name: str) -> np.ndarray:

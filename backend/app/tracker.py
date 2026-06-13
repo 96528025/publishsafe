@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+import numpy as np
+
 
 Box = tuple[int, int, int, int]
 
@@ -21,6 +23,7 @@ class Track:
     bbox: Box
     confidence: float
     missed: int = 0
+    mask: np.ndarray | None = None
 
 
 class IoUTracker:

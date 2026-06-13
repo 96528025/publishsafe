@@ -159,7 +159,7 @@ def process_video(
                 if track.track_id == creator_track_id:
                     continue
                 if mode == "blur":
-                    blur_person(frame, track.bbox, blur_strength)
+                    blur_person(frame, track.bbox, blur_strength, track.mask)
                 else:
                     overlay_avatar(frame, track.bbox, avatar)
             writer.write(frame)
