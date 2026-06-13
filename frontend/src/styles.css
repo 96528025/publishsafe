@@ -220,6 +220,7 @@ main { max-width: 1120px; margin: auto; padding: 56px 28px 80px; }
 }
 .blur-control input[type="range"] { width: 100%; margin: 18px 0 7px; accent-color: var(--teal); }
 .range-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
+.slider-hint { margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
 .privacy-summary {
   display: flex; gap: 11px; margin: 20px 0; padding: 14px;
   background: #eaf8f5; color: var(--teal-dark); border-radius: 12px;

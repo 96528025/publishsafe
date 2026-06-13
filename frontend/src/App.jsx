@@ -31,6 +31,8 @@ function App() {
   const [job, setJob] = useState(null);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [framePreviewUrl, setFramePreviewUrl] = useState("");
+  const [framePreviewBusy, setFramePreviewBusy] = useState(false);
 
   const stage = job?.status === "complete" && job.process_scope === "full" ? 3 : upload ? 2 : 1;
   const processing = job && !["complete", "failed"].includes(job.status);
@@ -55,12 +57,50 @@ function App() {
     return () => clearInterval(timer);
   }, [job?.job_id, job?.status]);
 
+  useEffect(() => {
+    if (!upload || !selectedId || mode !== "blur") {
+      setFramePreviewUrl("");
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setFramePreviewBusy(true);
+      try {
+        const response = await fetch(`${API}/api/frame-preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            video_id: upload.video_id,
+            selected_track_id: selectedId,
+            blur_strength: blurStrength,
+            people: upload.people,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Could not create frame preview");
+        setFramePreviewUrl(`${API}${data.preview_url}`);
+      } catch (previewError) {
+        if (previewError.name !== "AbortError") setError(previewError.message);
+      } finally {
+        if (!controller.signal.aborted) setFramePreviewBusy(false);
+      }
+    }, 200);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [upload, selectedId, mode, blurStrength]);
+
   async function uploadFile(file) {
     if (!file) return;
     setError("");
     setUpload(null);
     setSelectedId(null);
     setJob(null);
+    setFramePreviewUrl("");
     setBusy(true);
     const form = new FormData();
     form.append("file", file);
@@ -197,7 +237,10 @@ function App() {
                 <button className="text-button" onClick={reset}>Change video</button>
               </div>
               <div className="preview-frame">
-                <img src={`${API}${upload.preview_url}`} alt="Detected people preview" />
+                <img
+                  src={framePreviewUrl || `${API}${upload.preview_url}`}
+                  alt={framePreviewUrl ? "Blur effect frame preview" : "Detected people preview"}
+                />
                 {people.map((person) => {
                   const [x1, y1, x2, y2] = person.bbox;
                   return (
@@ -216,7 +259,9 @@ function App() {
                   );
                 })}
                 <div className="preview-caption">
-                  <ShieldCheck size={16} /> Selected creator preserved. Other people protected.
+                  {framePreviewBusy
+                    ? <><LoaderCircle className="spin" size={16} /> Updating blur preview...</>
+                    : <><ShieldCheck size={16} /> Selected creator preserved. Other people protected.</>}
                 </div>
               </div>
               {people.length === 0 ? (
@@ -286,6 +331,7 @@ function App() {
                     <span>Balanced</span>
                     <span>Maximum</span>
                   </div>
+                  <p className="slider-hint">The frame preview updates automatically when you move the slider.</p>
                 </div>
               )}
 

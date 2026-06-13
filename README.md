@@ -10,6 +10,7 @@ everyone else with a moving mascot or blur.
 2. YOLOv8n detects people and ByteTrack assigns stable IDs.
 3. Select yourself from an annotated preview.
 4. Choose a mascot or adjust anonymizing blur on a 10-100 strength slider.
+   The selected creator and blur strength are shown immediately on one frame.
 5. Preview the first 10 seconds at a faster 15 FPS / 720p proxy quality.
 6. Process and download the protected MP4.
 
@@ -192,6 +193,7 @@ quality option so speed improvements do not remove the quality-first baseline.
 ## API
 
 - `POST /api/upload`: validate, store, analyze, and create a preview
+- `POST /api/frame-preview`: render a fast single-frame blur preview
 - `POST /api/process`: start a protected-video job
 - `GET /api/jobs/{job_id}`: poll status and frame progress
 - `GET /api/health`: detector/tracker health summary

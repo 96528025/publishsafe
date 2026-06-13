@@ -29,6 +29,17 @@ class ProcessRequest(BaseModel):
     process_scope: Literal["preview", "full"] = "full"
 
 
+class FramePreviewRequest(BaseModel):
+    video_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    selected_track_id: int = Field(ge=1)
+    blur_strength: int = Field(default=40, ge=10, le=100)
+    people: list[PersonPreview]
+
+
+class FramePreviewResponse(BaseModel):
+    preview_url: str
+
+
 class JobResponse(BaseModel):
     job_id: str
     status: Literal["queued", "processing", "complete", "failed"]
