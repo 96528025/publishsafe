@@ -1,0 +1,11 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+frontend/node_modules/
+frontend/dist/
+uploads/*
+!uploads/.gitkeep
+outputs/*
+!outputs/.gitkeep
+yolov8n.pt
