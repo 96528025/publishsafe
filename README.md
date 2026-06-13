@@ -18,7 +18,7 @@ Requirements: [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 ![PublishSafe Docker quick start](docs/install.gif)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/publishsafe.git
+git clone https://github.com/96528025/publishsafe.git
 cd publishsafe
 ./scripts/start.sh
 ```
