@@ -60,20 +60,30 @@ def process_video(
         width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
         source_frame_count = max(1, int(capture.get(cv2.CAP_PROP_FRAME_COUNT)))
-        frame_limit = min(source_frame_count, max(1, int(fps * 10)))
-        frame_count = frame_limit if process_scope == "preview" else source_frame_count
-        suffix = "preview" if process_scope == "preview" else "protected"
+        source_frame_limit = (
+            min(source_frame_count, max(1, int(fps * 10)))
+            if process_scope == "preview"
+            else source_frame_count
+        )
+        frame_step = max(1, round(fps / 10)) if process_scope == "preview" else 1
+        output_fps = fps / frame_step
+        frame_count = (source_frame_limit + frame_step - 1) // frame_step
+        suffix = (
+            f"preview_{job_id[:8]}"
+            if process_scope == "preview"
+            else "protected"
+        )
         temporary = OUTPUT_DIR / f"{video_id}_{suffix}_silent.mp4"
         output = OUTPUT_DIR / f"{video_id}_{suffix}.mp4"
         output_width, output_height = width, height
-        if process_scope == "preview" and width > 1280:
-            scale = 1280 / width
-            output_width = 1280
+        if process_scope == "preview" and width > 960:
+            scale = 960 / width
+            output_width = 960
             output_height = int(height * scale) // 2 * 2
         writer = cv2.VideoWriter(
             str(temporary),
             cv2.VideoWriter_fourcc(*"mp4v"),
-            fps,
+            output_fps,
             (output_width, output_height),
         )
         if not writer.isOpened():
@@ -82,15 +92,26 @@ def process_video(
         detector.reset_tracking()
         avatar = load_avatar(avatar_style) if mode == "avatar" else None
         frame_number = 0
+        source_frame_number = 0
         creator_track_id = selected_track_id
         creator_appearance: np.ndarray | None = None
 
         while True:
-            if frame_number >= frame_count:
+            if source_frame_number >= source_frame_limit:
                 break
             ok, frame = capture.read()
             if not ok:
                 break
+            should_process = source_frame_number % frame_step == 0
+            source_frame_number += 1
+            if not should_process:
+                continue
+            if (output_width, output_height) != (width, height):
+                frame = cv2.resize(
+                    frame,
+                    (output_width, output_height),
+                    interpolation=cv2.INTER_AREA,
+                )
             tracks = detector.track(frame)
 
             if creator_appearance is None:
@@ -141,12 +162,6 @@ def process_video(
                     blur_person(frame, track.bbox, blur_strength)
                 else:
                     overlay_avatar(frame, track.bbox, avatar)
-            if (output_width, output_height) != (width, height):
-                frame = cv2.resize(
-                    frame,
-                    (output_width, output_height),
-                    interpolation=cv2.INTER_AREA,
-                )
             writer.write(frame)
             frame_number += 1
 
