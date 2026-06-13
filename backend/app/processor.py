@@ -43,7 +43,7 @@ def process_video(
     selected_track_id: int,
     mode: str,
     avatar_style: str,
-    blur_strength: str,
+    blur_strength: int,
     process_scope: str,
     detector: PersonDetector,
 ) -> None:
@@ -65,7 +65,7 @@ def process_video(
             if process_scope == "preview"
             else source_frame_count
         )
-        frame_step = max(1, round(fps / 10)) if process_scope == "preview" else 1
+        frame_step = max(1, round(fps / 15)) if process_scope == "preview" else 1
         output_fps = fps / frame_step
         frame_count = (source_frame_limit + frame_step - 1) // frame_step
         suffix = (
@@ -76,9 +76,9 @@ def process_video(
         temporary = OUTPUT_DIR / f"{video_id}_{suffix}_silent.mp4"
         output = OUTPUT_DIR / f"{video_id}_{suffix}.mp4"
         output_width, output_height = width, height
-        if process_scope == "preview" and width > 960:
-            scale = 960 / width
-            output_width = 960
+        if process_scope == "preview" and width > 1280:
+            scale = 1280 / width
+            output_width = 1280
             output_height = int(height * scale) // 2 * 2
         writer = cv2.VideoWriter(
             str(temporary),

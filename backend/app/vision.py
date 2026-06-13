@@ -157,7 +157,7 @@ def overlay_avatar(frame: np.ndarray, bbox: tuple[int, int, int, int], avatar: n
 def blur_person(
     frame: np.ndarray,
     bbox: tuple[int, int, int, int],
-    strength: str = "strong",
+    strength: int = 40,
 ) -> None:
     height, width = frame.shape[:2]
     x1, y1, x2, y2 = bbox
@@ -170,27 +170,28 @@ def blur_person(
     if region.size == 0:
         return
 
-    if strength == "standard":
-        kernel = max(21, (min(region.shape[:2]) // 7) | 1)
-        frame[y1:y2, x1:x2] = cv2.GaussianBlur(region, (kernel, kernel), 0)
-        return
-
     region_height, region_width = region.shape[:2]
-    reduced_width = max(8, region_width // 18)
-    reduced_height = max(8, region_height // 18)
-    anonymized = cv2.resize(
-        region,
-        (reduced_width, reduced_height),
-        interpolation=cv2.INTER_AREA,
-    )
-    anonymized = cv2.resize(
-        anonymized,
-        (region_width, region_height),
-        interpolation=cv2.INTER_LINEAR,
-    )
+    normalized = max(10, min(100, strength)) / 100.0
+    anonymized = region
 
-    kernel = max(51, (min(region.shape[:2]) // 3) | 1)
-    kernel = min(kernel, 151)
+    # Pixelation fades in above the midpoint instead of appearing abruptly.
+    if strength > 50:
+        divisor = 8 + int((strength - 50) / 50 * 14)
+        reduced_width = max(8, region_width // divisor)
+        reduced_height = max(8, region_height // divisor)
+        anonymized = cv2.resize(
+            region,
+            (reduced_width, reduced_height),
+            interpolation=cv2.INTER_AREA,
+        )
+        anonymized = cv2.resize(
+            anonymized,
+            (region_width, region_height),
+            interpolation=cv2.INTER_LINEAR,
+        )
+
+    kernel = int(11 + min(region.shape[:2]) * (0.08 + 0.34 * normalized))
+    kernel = min(151, max(15, kernel | 1))
     frame[y1:y2, x1:x2] = cv2.GaussianBlur(anonymized, (kernel, kernel), 0)
 
 

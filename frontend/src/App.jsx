@@ -3,7 +3,6 @@ import {
   Check,
   Download,
   Eye,
-  Gauge,
   Image,
   LoaderCircle,
   LockKeyhole,
@@ -27,7 +26,7 @@ function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [avatar, setAvatar] = useState("sunny");
   const [mode, setMode] = useState("avatar");
-  const [blurStrength, setBlurStrength] = useState("strong");
+  const [blurStrength, setBlurStrength] = useState(40);
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState(null);
   const [error, setError] = useState("");
@@ -268,23 +267,25 @@ function App() {
               )}
 
               {mode === "blur" && (
-                <div className="strength-options">
-                  <button
-                    className={blurStrength === "standard" ? "selected" : ""}
-                    onClick={() => setBlurStrength("standard")}
-                  >
-                    <span className="strength-icon"><Eye size={18} /></span>
-                    <span><strong>Standard blur</strong><small>Softer, keeps more motion detail</small></span>
-                    {blurStrength === "standard" && <Check size={15} />}
-                  </button>
-                  <button
-                    className={blurStrength === "strong" ? "selected" : ""}
-                    onClick={() => setBlurStrength("strong")}
-                  >
-                    <span className="strength-icon"><Gauge size={18} /></span>
-                    <span><strong>Strong blur</strong><small>Maximum identity protection</small></span>
-                    {blurStrength === "strong" && <Check size={15} />}
-                  </button>
+                <div className="blur-control">
+                  <div className="blur-control-heading">
+                    <span><strong>Blur strength</strong><small>Choose how much identity detail to remove</small></span>
+                    <output>{blurStrength}%</output>
+                  </div>
+                  <input
+                    type="range"
+                    min="10"
+                    max="100"
+                    step="5"
+                    value={blurStrength}
+                    onChange={(event) => setBlurStrength(Number(event.target.value))}
+                    aria-label="Blur strength"
+                  />
+                  <div className="range-labels">
+                    <span>Gentle</span>
+                    <span>Balanced</span>
+                    <span>Maximum</span>
+                  </div>
                 </div>
               )}
 
