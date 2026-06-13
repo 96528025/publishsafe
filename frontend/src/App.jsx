@@ -25,7 +25,7 @@ function App() {
   const [upload, setUpload] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [avatar, setAvatar] = useState("sunny");
-  const [mode, setMode] = useState("avatar");
+  const [mode, setMode] = useState("blur");
   const [blurStrength, setBlurStrength] = useState(40);
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState(null);
@@ -169,7 +169,7 @@ function App() {
         <section className="hero">
           <div className="eyebrow"><Sparkles size={15} /> Made for creators, built for consent</div>
           <h1>Share the moment.<br /><em>Protect the crowd.</em></h1>
-          <p>Keep yourself visible while automatically covering everyone else with friendly avatars.</p>
+          <p>Keep yourself visible while automatically blurring everyone else with privacy-aware person masks.</p>
         </section>
 
         <nav className="steps" aria-label="Workflow progress">
@@ -287,11 +287,11 @@ function App() {
               <span className="section-label">Protection style</span>
               <h2>Cover everyone else</h2>
               <div className="mode-switch">
-                <button className={mode === "avatar" ? "active" : ""} onClick={() => setMode("avatar")}>
-                  <Image size={17} /> Avatars
-                </button>
                 <button className={mode === "blur" ? "active" : ""} onClick={() => setMode("blur")}>
                   <Eye size={17} /> Blur
+                </button>
+                <button className={mode === "avatar" ? "active" : ""} onClick={() => setMode("avatar")}>
+                  <Image size={17} /> Avatars
                 </button>
               </div>
 

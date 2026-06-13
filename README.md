@@ -9,7 +9,8 @@ everyone else with a moving mascot or blur.
 1. Upload an MP4, MOV, AVI, MKV, or WebM video.
 2. YOLOv8n-seg detects person masks and ByteTrack assigns stable IDs.
 3. Select yourself from an annotated preview.
-4. Choose a mascot or adjust anonymizing blur on a 10-100 strength slider.
+4. Adjust the default anonymizing blur on a 10-100 strength slider, or choose
+   the experimental avatar mode.
    The selected creator and blur strength are shown immediately on one frame.
 5. Preview the first 10 seconds at a faster 15 FPS / 720p proxy quality.
 6. Process and download the protected MP4.
