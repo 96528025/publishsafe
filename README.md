@@ -45,10 +45,26 @@ docker compose logs -f
    the experimental avatar mode.
    The selected creator and blur strength are shown immediately on one frame.
 5. Preview the first 10 seconds at a faster 15 FPS / 720p proxy quality.
-6. Process and download the protected MP4.
+6. Process and download the protected MP4 at the source resolution and frame
+   rate.
 
 The default privacy rule is **protect everyone except the selected creator**.
 Uploads and outputs stay in local `uploads/` and `outputs/` directories.
+
+### Preview vs. full export quality
+
+PublishSafe uses lower-cost previews so users can test the selected person and
+blur strength without waiting for a complete render:
+
+| Mode | Purpose | Quality |
+| --- | --- | --- |
+| Single-frame preview | Check the selected creator and blur strength | One JPEG frame |
+| 10-second preview | Quickly review tracking and blur in motion | Up to 1280px wide, approximately 15 FPS |
+| Full Process | Create the final shareable video | Source resolution, source FPS, every frame processed |
+
+The reduced preview quality does **not** affect the Full Process export. For
+example, a 4K 30 FPS source remains 4K 30 FPS in the final render; only the
+10-second preview uses the faster proxy settings.
 
 ## Architecture
 
