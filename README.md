@@ -71,6 +71,24 @@ npm run dev
 Open `http://localhost:5173`. API documentation is available at
 `http://localhost:8000/docs`.
 
+## Fast testing
+
+Use a short, low-resolution clip while tuning blur or tracking:
+
+```bash
+./scripts/make_test_clip.sh /path/to/video.mp4
+```
+
+To test a specific section, pass the start time and duration in seconds:
+
+```bash
+./scripts/make_test_clip.sh /path/to/video.mp4 10 5
+```
+
+The script creates a 960x540, 15 FPS clip in `test-clips/`. Upload that clip
+through the normal UI. Five seconds is about 75 frames and processes much
+faster than a full 4K video.
+
 ## API
 
 - `POST /api/upload`: validate, store, analyze, and create a preview
