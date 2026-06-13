@@ -17,8 +17,14 @@ from .config import (
     UPLOAD_DIR,
 )
 from .processor import create_job, find_video, jobs, jobs_lock, process_video
-from .schemas import JobResponse, ProcessRequest, UploadResponse
-from .vision import PersonDetector, draw_preview, ensure_avatar_assets
+from .schemas import (
+    FramePreviewRequest,
+    FramePreviewResponse,
+    JobResponse,
+    ProcessRequest,
+    UploadResponse,
+)
+from .vision import PersonDetector, blur_person, draw_preview, ensure_avatar_assets
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
@@ -115,6 +121,8 @@ async def upload_video(file: UploadFile = File(...)) -> UploadResponse:
     people_data = [
         (track.track_id, track.bbox, track.confidence) for track in tracks
     ]
+    raw_preview_path = UPLOAD_DIR / f"{video_id}_preview_raw.jpg"
+    cv2.imwrite(str(raw_preview_path), frame)
     preview = draw_preview(frame, people_data)
     preview_path = UPLOAD_DIR / f"{video_id}_preview.jpg"
     cv2.imwrite(str(preview_path), preview)
@@ -132,6 +140,40 @@ async def upload_video(file: UploadFile = File(...)) -> UploadResponse:
         fps=fps,
         frame_count=frame_count,
     )
+
+
+@app.post("/api/frame-preview", response_model=FramePreviewResponse)
+def create_frame_preview(request: FramePreviewRequest) -> FramePreviewResponse:
+    raw_preview_path = UPLOAD_DIR / f"{request.video_id}_preview_raw.jpg"
+    frame = cv2.imread(str(raw_preview_path))
+    if frame is None:
+        try:
+            source = find_video(request.video_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        capture = cv2.VideoCapture(str(source))
+        fps = capture.get(cv2.CAP_PROP_FPS) or 30.0
+        frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        preview_index = max(0, min(frame_count // 3, int(fps * 2)))
+        capture.set(cv2.CAP_PROP_POS_FRAMES, preview_index)
+        ok, frame = capture.read()
+        capture.release()
+        if not ok or frame is None:
+            raise HTTPException(status_code=422, detail="Could not read the preview frame")
+        cv2.imwrite(str(raw_preview_path), frame)
+
+    for person in request.people:
+        if person.track_id == request.selected_track_id:
+            continue
+        blur_person(frame, tuple(person.bbox), request.blur_strength)
+
+    output_path = (
+        UPLOAD_DIR
+        / f"{request.video_id}_frame_blur_{request.selected_track_id}_{request.blur_strength}.jpg"
+    )
+    if not cv2.imwrite(str(output_path), frame):
+        raise HTTPException(status_code=500, detail="Could not create frame preview")
+    return FramePreviewResponse(preview_url=f"/uploads/{output_path.name}")
 
 
 @app.post("/api/process", response_model=JobResponse)
