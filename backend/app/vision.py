@@ -157,12 +157,32 @@ def overlay_avatar(frame: np.ndarray, bbox: tuple[int, int, int, int], avatar: n
 def blur_person(frame: np.ndarray, bbox: tuple[int, int, int, int]) -> None:
     height, width = frame.shape[:2]
     x1, y1, x2, y2 = bbox
+    padding_x = int((x2 - x1) * 0.08)
+    padding_y = int((y2 - y1) * 0.05)
+    x1, x2 = x1 - padding_x, x2 + padding_x
+    y1, y2 = y1 - padding_y, y2 + padding_y
     x1, y1, x2, y2 = max(0, x1), max(0, y1), min(width, x2), min(height, y2)
     region = frame[y1:y2, x1:x2]
     if region.size == 0:
         return
-    kernel = max(21, (min(region.shape[:2]) // 7) | 1)
-    frame[y1:y2, x1:x2] = cv2.GaussianBlur(region, (kernel, kernel), 0)
+
+    region_height, region_width = region.shape[:2]
+    reduced_width = max(8, region_width // 18)
+    reduced_height = max(8, region_height // 18)
+    anonymized = cv2.resize(
+        region,
+        (reduced_width, reduced_height),
+        interpolation=cv2.INTER_AREA,
+    )
+    anonymized = cv2.resize(
+        anonymized,
+        (region_width, region_height),
+        interpolation=cv2.INTER_LINEAR,
+    )
+
+    kernel = max(51, (min(region.shape[:2]) // 3) | 1)
+    kernel = min(kernel, 151)
+    frame[y1:y2, x1:x2] = cv2.GaussianBlur(anonymized, (kernel, kernel), 0)
 
 
 def load_avatar(name: str) -> np.ndarray:

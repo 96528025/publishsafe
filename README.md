@@ -9,7 +9,7 @@ everyone else with a moving mascot or blur.
 1. Upload an MP4, MOV, AVI, MKV, or WebM video.
 2. YOLOv8n detects people and ByteTrack assigns stable IDs.
 3. Select yourself from an annotated preview.
-4. Choose a mascot or blur protection style.
+4. Choose a mascot or strong anonymizing blur protection style.
 5. Process and download the protected MP4.
 
 The default privacy rule is **protect everyone except the selected creator**.
