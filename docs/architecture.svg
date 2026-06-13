@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="260" viewBox="0 0 1100 260">
+  <defs>
+    <style>
+      .title { font: 700 20px Arial, sans-serif; fill: #172032; }
+      .text { font: 15px Arial, sans-serif; fill: #596273; }
+      .box { fill: #ffffff; stroke: #12b89f; stroke-width: 2; rx: 16; }
+      .arrow { stroke: #172032; stroke-width: 2; fill: none; marker-end: url(#head); }
+    </style>
+    <marker id="head" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#172032"/>
+    </marker>
+  </defs>
+  <rect width="1100" height="260" fill="#f7f5f0"/>
+  <rect class="box" x="30" y="72" width="170" height="110"/>
+  <text class="title" x="115" y="112" text-anchor="middle">React UI</text>
+  <text class="text" x="115" y="142" text-anchor="middle">Upload + select</text>
+  <text class="text" x="115" y="165" text-anchor="middle">Blur preview</text>
+  <path class="arrow" d="M200 127 H245"/>
+  <rect class="box" x="250" y="72" width="170" height="110"/>
+  <text class="title" x="335" y="112" text-anchor="middle">FastAPI</text>
+  <text class="text" x="335" y="142" text-anchor="middle">Jobs + progress</text>
+  <text class="text" x="335" y="165" text-anchor="middle">Local storage</text>
+  <path class="arrow" d="M420 127 H465"/>
+  <rect class="box" x="470" y="72" width="170" height="110"/>
+  <text class="title" x="555" y="112" text-anchor="middle">YOLOv8n-seg</text>
+  <text class="text" x="555" y="142" text-anchor="middle">Person masks</text>
+  <text class="text" x="555" y="165" text-anchor="middle">No face identity</text>
+  <path class="arrow" d="M640 127 H685"/>
+  <rect class="box" x="690" y="72" width="170" height="110"/>
+  <text class="title" x="775" y="112" text-anchor="middle">ByteTrack</text>
+  <text class="text" x="775" y="142" text-anchor="middle">Stable person IDs</text>
+  <text class="text" x="775" y="165" text-anchor="middle">Creator recovery</text>
+  <path class="arrow" d="M860 127 H905"/>
+  <rect class="box" x="910" y="72" width="160" height="110"/>
+  <text class="title" x="990" y="112" text-anchor="middle">OpenCV</text>
+  <text class="text" x="990" y="142" text-anchor="middle">Mask blur</text>
+  <text class="text" x="990" y="165" text-anchor="middle">FFmpeg MP4</text>
+</svg>

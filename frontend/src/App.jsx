@@ -13,7 +13,7 @@ import {
   Users,
 } from "lucide-react";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const avatarOptions = [
   { id: "sunny", name: "Sunny", note: "Warm & playful" },
   { id: "cosmo", name: "Cosmo", note: "Dreamy & bold" },
