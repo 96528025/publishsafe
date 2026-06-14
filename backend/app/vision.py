@@ -5,7 +5,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .config import AVATAR_DIR, BYTETRACK_CONFIG
+from .config import AVATAR_DIR, BYTETRACK_CONFIG, INFERENCE_DEVICE
 from .tracker import Track
 
 logger = logging.getLogger(__name__)
@@ -20,12 +20,22 @@ class PersonDetector:
                 "ultralytics is not installed. Run: pip install -r backend/requirements.txt"
             ) from exc
         model_path = os.getenv("YOLO_MODEL_PATH", "yolov8n-seg.pt")
-        logger.info("Loading YOLOv8 nano person segmentation model: %s", model_path)
+        self.device = INFERENCE_DEVICE
+        logger.info(
+            "Loading YOLOv8 nano person segmentation model: %s on %s",
+            model_path,
+            self.device,
+        )
         self.model = YOLO(model_path)
 
     def detect(self, frame: np.ndarray) -> list[tuple[tuple[int, int, int, int], float]]:
         results = self.model.predict(
-            frame, classes=[0], conf=0.3, imgsz=640, verbose=False
+            frame,
+            classes=[0],
+            conf=0.3,
+            imgsz=640,
+            device=self.device,
+            verbose=False,
         )
         detections = []
         for box in results[0].boxes:
@@ -45,6 +55,7 @@ class PersonDetector:
             classes=[0],
             conf=0.3,
             imgsz=640,
+            device=self.device,
             verbose=False,
         )
         boxes = results[0].boxes

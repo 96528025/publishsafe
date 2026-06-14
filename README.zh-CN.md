@@ -45,6 +45,27 @@ docker compose logs -f
 ./scripts/stop.sh
 ```
 
+## 维护者 Owner 加速模式
+
+项目同时保留了一个只为维护者这台 Apple M2 Mac 配置的原生加速入口：
+
+```bash
+./scripts/start_owner.sh
+```
+
+该模式使用 PyTorch MPS 调用 Apple GPU，并使用 VideoToolbox 进行 H.264
+硬件编码。本机身份记录在一个不会上传 GitHub 的私有指纹文件中，因此其他人
+Clone 项目后无法误用这个模式。
+
+普通用户仍然统一使用 `./scripts/start.sh`。两个模式共用同一套前端、检测、
+追踪、模糊和导出代码，区别仅在于运行设备和最终编码器。
+
+在启动终端按 `Ctrl+C` 可以停止 Owner 模式，也可以运行：
+
+```bash
+./scripts/stop_owner.sh
+```
+
 ## 使用流程
 
 1. 上传 MP4、MOV、AVI、MKV 或 WebM 视频。
@@ -176,7 +197,8 @@ PublishSafe 使用 ByteTrack 和衣服外观特征辅助恢复人物，但长时
 ### Docker 没有使用 Mac GPU
 
 为了提高兼容性，当前 Docker 版本使用 CPU 推理。Apple Silicon 的 MPS
-加速仍在后续优化计划中。
+加速只在维护者这台已配置的 M2 Mac 上通过 Owner 原生模式启用。普通用户
+仍然使用 Docker CPU 版本。
 
 ## 项目结构
 

@@ -14,7 +14,9 @@ from .config import (
     AVATAR_DIR,
     MAX_UPLOAD_BYTES,
     OUTPUT_DIR,
+    RUNTIME_PROFILE,
     UPLOAD_DIR,
+    VIDEO_ENCODER,
 )
 from .processor import create_job, find_video, jobs, jobs_lock, process_video
 from .schemas import (
@@ -58,7 +60,14 @@ app.mount("/avatars", StaticFiles(directory=AVATAR_DIR), name="avatars")
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "model": "yolov8n-seg", "tracker": "bytetrack"}
+    return {
+        "status": "ok",
+        "model": "yolov8n-seg",
+        "tracker": "bytetrack",
+        "profile": RUNTIME_PROFILE,
+        "device": detector.device if detector is not None else "loading",
+        "encoder": VIDEO_ENCODER,
+    }
 
 
 @app.post("/api/upload", response_model=UploadResponse)
