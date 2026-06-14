@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 
@@ -9,6 +10,9 @@ BYTETRACK_CONFIG = PROJECT_ROOT / "backend" / "bytetrack.yaml"
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+RUNTIME_PROFILE = os.getenv("PUBLISHSAFE_PROFILE", "portable")
+INFERENCE_DEVICE = os.getenv("PUBLISHSAFE_DEVICE", "cpu")
+VIDEO_ENCODER = os.getenv("PUBLISHSAFE_VIDEO_ENCODER", "libx264")
 
 for directory in (UPLOAD_DIR, OUTPUT_DIR, AVATAR_DIR):
     directory.mkdir(parents=True, exist_ok=True)

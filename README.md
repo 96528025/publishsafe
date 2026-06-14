@@ -38,6 +38,30 @@ docker compose logs -f
 ./scripts/stop.sh
 ```
 
+## Maintainer owner mode
+
+The repository also contains a native accelerated profile for the maintainer's
+preconfigured Apple M2 Mac:
+
+```bash
+./scripts/start_owner.sh
+```
+
+This profile uses Apple GPU inference through PyTorch MPS and H.264 hardware
+encoding through VideoToolbox. It requires a local machine fingerprint file
+that is excluded from Git, so cloning the repository does not enable owner
+mode on another computer.
+
+Everyone else should continue to use `./scripts/start.sh`. Both modes share the
+same frontend, detection, tracking, blur, and export code. Only the execution
+device and final encoder differ.
+
+Stop the native owner services with `Ctrl+C` in their terminal or:
+
+```bash
+./scripts/stop_owner.sh
+```
+
 ## What it does
 
 1. Upload an MP4, MOV, AVI, MKV, or WebM video.
@@ -199,7 +223,8 @@ frame or open an issue with a reproducible, non-sensitive sample.
 ### Apple Silicon GPU is not used in Docker
 
 The Docker setup currently uses CPU inference for portability. Running from
-source on macOS is the path for future MPS acceleration work.
+source through the maintainer owner profile uses MPS on its preconfigured M2
+Mac. Other users should treat the Docker CPU workflow as the supported default.
 
 ## Performance and quality
 

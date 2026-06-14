@@ -9,7 +9,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from .config import OUTPUT_DIR, UPLOAD_DIR
+from .config import OUTPUT_DIR, UPLOAD_DIR, VIDEO_ENCODER
 from .vision import (
     PersonDetector,
     appearance_distance,
@@ -23,6 +23,63 @@ logger = logging.getLogger(__name__)
 
 jobs: dict[str, dict[str, Any]] = {}
 jobs_lock = threading.Lock()
+
+
+def ffmpeg_command(
+    temporary: Path,
+    source: Path,
+    output: Path,
+    encoder: str,
+) -> list[str]:
+    command = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(temporary),
+        "-i",
+        str(source),
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0?",
+    ]
+    if encoder == "h264_videotoolbox":
+        command.extend(
+            [
+                "-c:v",
+                "h264_videotoolbox",
+                "-q:v",
+                "65",
+                "-profile:v",
+                "high",
+                "-pix_fmt",
+                "yuv420p",
+            ]
+        )
+    else:
+        command.extend(
+            [
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "20",
+                "-pix_fmt",
+                "yuv420p",
+            ]
+        )
+    command.extend(
+        [
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+            "-shortest",
+            str(output),
+        ]
+    )
+    return command
 
 
 def find_video(video_id: str) -> Path:
@@ -189,13 +246,23 @@ def process_video(
                     else "Finalizing video and audio"
                 ),
             )
-            command = [
-                "ffmpeg", "-y", "-i", str(temporary), "-i", str(source),
-                "-map", "0:v:0", "-map", "1:a:0?", "-c:v", "libx264",
-                "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-movflags", "+faststart", "-shortest", str(output),
-            ]
-            result = subprocess.run(command, capture_output=True, text=True)
+            preferred_encoder = VIDEO_ENCODER
+            result = subprocess.run(
+                ffmpeg_command(temporary, source, output, preferred_encoder),
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0 and preferred_encoder != "libx264":
+                logger.warning(
+                    "%s encoding failed; retrying with libx264: %s",
+                    preferred_encoder,
+                    result.stderr[-500:],
+                )
+                result = subprocess.run(
+                    ffmpeg_command(temporary, source, output, "libx264"),
+                    capture_output=True,
+                    text=True,
+                )
             if result.returncode != 0:
                 logger.warning("ffmpeg audio merge failed: %s", result.stderr[-500:])
                 temporary.replace(output)
