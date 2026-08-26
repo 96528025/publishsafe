@@ -67,12 +67,13 @@ Stop the native owner services with `Ctrl+C` in their terminal or:
 ## What it does
 
 1. Upload an MP4, MOV, AVI, MKV, or WebM video.
-2. YOLOv8n-seg detects person masks and ByteTrack assigns stable IDs.
+2. YOLOv8n-seg detects person masks and ByteTrack assigns tracking IDs.
 3. Select yourself from an annotated preview.
 4. Adjust the default anonymizing blur on a 10-100 strength slider, or choose
    the experimental avatar mode.
    The selected creator and blur strength are shown immediately on one frame.
-5. Preview the first 10 seconds at a faster 15 FPS / 720p proxy quality.
+5. Preview the first 10 seconds at proxy quality: up to 1280px wide and
+   approximately 15 FPS, depending on the source frame rate.
 6. Process and download the protected MP4 at the source resolution and frame
    rate.
 
@@ -158,6 +159,8 @@ Open `http://localhost:5173`. API documentation is available at
 
 The test suite is deliberately model-free: it needs no YOLO weights, no GPU, no
 sample video, and no network access, so it typically completes in seconds.
+The current verified baseline is **50/50 backend tests passing**, plus a
+successful production React build.
 
 ```bash
 python3 -m venv .venv
@@ -263,8 +266,10 @@ Then open `http://localhost:8080`.
 
 ### Processing remains at 99%
 
-Frame processing has finished and FFmpeg is encoding H.264 and restoring
-audio. Large 4K videos can spend noticeable time in this final stage.
+Frame processing has finished. When FFmpeg is available, it is encoding H.264
+and restoring source audio; large 4K videos can spend noticeable time in this
+final stage. Without FFmpeg, or if the merge fails, PublishSafe keeps the
+OpenCV-rendered silent MP4.
 
 ### Docker runs out of memory
 
@@ -290,7 +295,8 @@ The current full-video pipeline is the **quality-first baseline**:
 - It processes every source frame with YOLO and ByteTrack.
 - It preserves the source resolution and frame rate in the rendered video.
 - It uses the full tracking history instead of intentionally skipping frames.
-- It encodes a browser-compatible H.264 MP4 and restores the source audio.
+- When FFmpeg is available, it encodes a browser-compatible H.264 MP4 and
+  restores the source audio; otherwise it keeps the OpenCV-rendered silent MP4.
 
 This makes the current version slow on 4K or high-FPS footage, but it avoids
 deliberately reducing temporal coverage or output resolution. It is the
@@ -407,7 +413,7 @@ Ultralytics dependency.
   edges so the background remains clear. It falls back to a bounding box if a
   mask is unavailable on a frame.
 - Tracking uses ByteTrack with a longer occlusion buffer. A clothing-appearance
-  fallback recovers the selected creator when IDs switch during crossings.
+  fallback attempts to recover the selected creator when IDs switch during crossings.
 - Processing is serialized around the YOLO model for demo reliability.
 - OpenCV writes video frames. When `ffmpeg` is installed, source audio is
   automatically merged into the final file.

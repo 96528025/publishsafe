@@ -69,7 +69,7 @@ Clone 项目后无法误用这个模式。
 ## 使用流程
 
 1. 上传 MP4、MOV、AVI、MKV 或 WebM 视频。
-2. YOLOv8n-seg 检测人物，ByteTrack 为人物分配追踪 ID。
+2. YOLOv8n-seg 检测人物轮廓，ByteTrack 为人物分配追踪 ID。
 3. 在预览图中选择“哪一个人是我”。
 4. 使用 10–100 滑块调整模糊强度，或尝试实验性的头像模式。
 5. 先查看单帧效果，也可以生成前 10 秒测试视频。
@@ -162,6 +162,23 @@ npm run dev
 
 然后打开 `http://localhost:5173`。
 
+## 测试
+
+后端测试刻意采用 model-free 设计：不下载 YOLO 权重，不加载 PyTorch，不需要 GPU、
+样例视频或网络。当前核验基线为 **50/50 项后端测试通过**，并且 React production build
+成功。
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements-test.txt
+pytest
+
+cd frontend
+npm ci
+npm run build
+```
+
 ## 常见问题
 
 ### Docker 启动后打不开网页
@@ -186,8 +203,9 @@ ports:
 
 ### 处理进度停在 99%
 
-逐帧处理已经完成，FFmpeg 正在编码 H.264 并恢复音频。
-4K 或较长视频在这个阶段可能需要继续等待。
+逐帧处理已经完成。如果安装了 FFmpeg，此时会编码 H.264 并恢复原视频音频，
+4K 或较长视频在这个阶段可能需要继续等待。如果没有 FFmpeg，或音频合并失败，
+PublishSafe 会保留 OpenCV 生成的无声 MP4。
 
 ### 人物交叉后选择的人发生变化
 
