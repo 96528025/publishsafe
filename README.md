@@ -1,5 +1,7 @@
 # PublishSafe
 
+[![CI](https://github.com/96528025/publishsafe/actions/workflows/ci.yml/badge.svg)](https://github.com/96528025/publishsafe/actions/workflows/ci.yml)
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 **Privacy-preserving video publishing for creators.**
@@ -107,7 +109,9 @@ publishsafe/
 │   │   ├── processor.py  # Background video processing jobs
 │   │   ├── tracker.py    # Small fallback tracking utilities
 │   │   └── vision.py     # YOLO segmentation and privacy rendering
-│   └── requirements.txt
+│   ├── tests/            # Model-free pytest suite
+│   ├── requirements.txt
+│   └── requirements-test.txt
 ├── frontend/             # Vite + React UI
 ├── outputs/
 └── uploads/
@@ -149,6 +153,59 @@ npm run dev
 
 Open `http://localhost:5173`. API documentation is available at
 `http://localhost:8000/docs`.
+
+## Testing
+
+The test suite is deliberately model-free: it needs no YOLO weights, no GPU, no
+sample video, and no network access, so it typically completes in seconds.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements-test.txt
+pytest
+```
+
+`backend/requirements-test.txt` is separate from `backend/requirements.txt` and
+excludes `ultralytics`, so installing it does not pull in PyTorch.
+
+Build the frontend the same way CI does:
+
+```bash
+cd frontend
+npm ci
+npm run build
+```
+
+### What CI covers
+
+CI runs on pushes to `main` and on every pull request as three parallel jobs:
+
+| Job | Steps |
+| --- | --- |
+| Backend tests | Python 3.11, install `backend/requirements-test.txt`, run `pytest` |
+| Frontend build | Node 20, `npm ci`, `npm run build` |
+| Compose config | `docker compose config --quiet` |
+
+The backend tests cover request validation (video ID format, blur strength
+bounds, mode and scope vocabularies), the IoU tracker's ID assignment and
+expiry logic, the frame-level blur and appearance helpers on small NumPy
+arrays, and the API's own routing, status codes, and background-job dispatch
+with the detector replaced by a stub.
+
+### What CI does not cover
+
+**CI never runs real YOLO inference.** It does not download model weights, load
+a segmentation model, decode or encode video, or invoke FFmpeg. The API tests
+mock the detector and the background processor at the module boundary — they
+verify PublishSafe's own dispatch and error handling, not detection, tracking,
+or export quality. They are not end-to-end ML tests.
+
+Real end-to-end verification still happens manually through the demo and sample
+workflow: `./scripts/download_sample.sh`, then upload the clip through the UI
+and process it. Detection accuracy, ByteTrack ID stability across crossings,
+mask-aligned blur quality, and audio-preserving export are only exercised that
+way.
 
 ## Sample video
 

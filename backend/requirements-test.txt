@@ -1,0 +1,12 @@
+# Test-only dependencies.
+#
+# Deliberately excludes ultralytics/torch: the test suite never loads a YOLO
+# model, and the default PyPI torch wheel on Linux is a multi-gigabyte CUDA
+# build that would dominate CI time. opencv-python-headless replaces
+# opencv-python because GitHub runners have no libGL.so.1.
+fastapi==0.115.12
+python-multipart==0.0.20
+opencv-python-headless==4.11.0.86
+numpy>=1.26,<3
+httpx>=0.27
+pytest>=8.0

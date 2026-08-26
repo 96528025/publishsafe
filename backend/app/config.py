@@ -3,9 +3,17 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-UPLOAD_DIR = PROJECT_ROOT / "uploads"
-OUTPUT_DIR = PROJECT_ROOT / "outputs"
-AVATAR_DIR = PROJECT_ROOT / "assets" / "avatars"
+
+
+def _storage_dir(env_var: str, default: Path) -> Path:
+    # Overridable so tests can redirect writes away from the real media folders.
+    override = os.getenv(env_var)
+    return Path(override).expanduser().resolve() if override else default
+
+
+UPLOAD_DIR = _storage_dir("PUBLISHSAFE_UPLOAD_DIR", PROJECT_ROOT / "uploads")
+OUTPUT_DIR = _storage_dir("PUBLISHSAFE_OUTPUT_DIR", PROJECT_ROOT / "outputs")
+AVATAR_DIR = _storage_dir("PUBLISHSAFE_AVATAR_DIR", PROJECT_ROOT / "assets" / "avatars")
 BYTETRACK_CONFIG = PROJECT_ROOT / "backend" / "bytetrack.yaml"
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
