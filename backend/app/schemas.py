@@ -27,6 +27,7 @@ class ProcessRequest(BaseModel):
     avatar_style: Literal["sunny", "cosmo", "bloom"] = "sunny"
     blur_strength: int = Field(default=40, ge=10, le=100)
     process_scope: Literal["preview", "full"] = "full"
+    audio_policy: Literal["remove", "preserve"] = "remove"
 
 
 class FramePreviewRequest(BaseModel):
@@ -47,3 +48,8 @@ class JobResponse(BaseModel):
     message: str
     output_url: str | None = None
     process_scope: Literal["preview", "full"] = "full"
+    audio_policy: Literal["remove", "preserve"] = "remove"
+    audio_status: Literal[
+        "pending", "removed", "preserved", "preserve_failed"
+    ] = "pending"
+    conservative_fallback_frames: int = 0

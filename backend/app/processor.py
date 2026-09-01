@@ -4,12 +4,13 @@ import subprocess
 import threading
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import cv2
 import numpy as np
 
 from .config import OUTPUT_DIR, UPLOAD_DIR, VIDEO_ENCODER
+from .privacy import CreatorCandidate, select_creator_exemption
 from .vision import (
     PersonDetector,
     appearance_distance,
@@ -24,25 +25,33 @@ logger = logging.getLogger(__name__)
 jobs: dict[str, dict[str, Any]] = {}
 jobs_lock = threading.Lock()
 
+AudioPolicy = Literal["remove", "preserve"]
+AudioStatus = Literal["removed", "preserved"]
+
+
+class AudioPreservationError(RuntimeError):
+    pass
+
 
 def ffmpeg_command(
     temporary: Path,
     source: Path,
     output: Path,
     encoder: str,
+    audio_policy: AudioPolicy = "remove",
 ) -> list[str]:
+    if audio_policy not in {"remove", "preserve"}:
+        raise ValueError(f"Unsupported audio policy: {audio_policy}")
+
     command = [
         "ffmpeg",
         "-y",
         "-i",
         str(temporary),
-        "-i",
-        str(source),
-        "-map",
-        "0:v:0",
-        "-map",
-        "1:a:0?",
     ]
+    if audio_policy == "preserve":
+        command.extend(["-i", str(source)])
+    command.extend(["-map", "0:v:0"])
     if encoder == "h264_videotoolbox":
         command.extend(
             [
@@ -69,17 +78,84 @@ def ffmpeg_command(
                 "yuv420p",
             ]
         )
-    command.extend(
-        [
-            "-c:a",
-            "aac",
-            "-movflags",
-            "+faststart",
-            "-shortest",
-            str(output),
-        ]
-    )
+    if audio_policy == "preserve":
+        # Do not use the optional-map suffix here: a preserve request must fail
+        # rather than silently return a video without the requested audio.
+        command.extend(["-map", "1:a:0", "-c:a", "aac", "-shortest"])
+    else:
+        command.append("-an")
+    command.extend(["-movflags", "+faststart", str(output)])
     return command
+
+
+def output_paths(
+    video_id: str,
+    job_id: str,
+    process_scope: str,
+    attempt_id: str,
+) -> tuple[Path, Path]:
+    scope = "preview" if process_scope == "preview" else "protected"
+    stem = f"{video_id}_{scope}_{job_id}_{attempt_id}"
+    return OUTPUT_DIR / f".{stem}_silent.mp4", OUTPUT_DIR / f"{stem}.mp4"
+
+
+def finalize_output(
+    temporary: Path,
+    source: Path,
+    output: Path,
+    encoder: str,
+    audio_policy: AudioPolicy,
+) -> AudioStatus:
+    if audio_policy not in {"remove", "preserve"}:
+        raise ValueError(f"Unsupported audio policy: {audio_policy}")
+    if not shutil.which("ffmpeg"):
+        if audio_policy == "preserve":
+            raise AudioPreservationError(
+                "Audio preservation was requested, but FFmpeg is unavailable"
+            )
+        temporary.replace(output)
+        return "removed"
+
+    result = subprocess.run(
+        ffmpeg_command(temporary, source, output, encoder, audio_policy),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 and encoder != "libx264":
+        logger.warning(
+            "%s encoding failed; retrying with libx264: %s",
+            encoder,
+            result.stderr[-500:],
+        )
+        result = subprocess.run(
+            ffmpeg_command(temporary, source, output, "libx264", audio_policy),
+            capture_output=True,
+            text=True,
+        )
+
+    if result.returncode != 0:
+        output.unlink(missing_ok=True)
+        if audio_policy == "preserve":
+            logger.error("FFmpeg audio preservation failed: %s", result.stderr[-500:])
+            raise AudioPreservationError("FFmpeg could not preserve the source audio")
+        logger.warning("FFmpeg video encoding failed: %s", result.stderr[-500:])
+        temporary.replace(output)
+        return "removed"
+
+    temporary.unlink(missing_ok=True)
+    return "preserved" if audio_policy == "preserve" else "removed"
+
+
+def completion_message(process_scope: str, audio_status: AudioStatus) -> str:
+    subject = (
+        "Your 10-second preview"
+        if process_scope == "preview"
+        else "Your protected video"
+    )
+    audio_result = (
+        "source audio" if audio_status == "preserved" else "audio removed"
+    )
+    return f"{subject} is ready with {audio_result}"
 
 
 def find_video(video_id: str) -> Path:
@@ -103,11 +179,21 @@ def process_video(
     blur_strength: int,
     process_scope: str,
     detector: PersonDetector,
+    audio_policy: AudioPolicy = "remove",
 ) -> None:
     capture = None
     writer = None
+    temporary: Path | None = None
+    output: Path | None = None
+    conservative_fallback_frames = 0
     try:
-        set_job(job_id, status="processing", message="Loading video")
+        set_job(
+            job_id,
+            status="processing",
+            message="Loading video",
+            audio_policy=audio_policy,
+            audio_status="pending",
+        )
         source = find_video(video_id)
         capture = cv2.VideoCapture(str(source))
         if not capture.isOpened():
@@ -125,13 +211,12 @@ def process_video(
         frame_step = max(1, round(fps / 15)) if process_scope == "preview" else 1
         output_fps = fps / frame_step
         frame_count = (source_frame_limit + frame_step - 1) // frame_step
-        suffix = (
-            f"preview_{job_id[:8]}"
-            if process_scope == "preview"
-            else "protected"
+        temporary, output = output_paths(
+            video_id,
+            job_id,
+            process_scope,
+            uuid.uuid4().hex,
         )
-        temporary = OUTPUT_DIR / f"{video_id}_{suffix}_silent.mp4"
-        output = OUTPUT_DIR / f"{video_id}_{suffix}.mp4"
         output_width, output_height = width, height
         if process_scope == "preview" and width > 1280:
             scale = 1280 / width
@@ -152,6 +237,7 @@ def process_video(
         source_frame_number = 0
         creator_track_id = selected_track_id
         creator_appearance: np.ndarray | None = None
+        last_fallback_detail: str | None = None
 
         while True:
             if source_frame_number >= source_frame_limit:
@@ -171,51 +257,60 @@ def process_video(
                 )
             tracks = detector.track(frame)
 
+            track_appearances = {
+                track.track_id: appearance_histogram(frame, track.bbox)
+                for track in tracks
+            }
             if creator_appearance is None:
                 selected = next(
                     (track for track in tracks if track.track_id == selected_track_id),
                     None,
                 )
                 if selected is not None:
-                    creator_appearance = appearance_histogram(frame, selected.bbox)
-            else:
-                candidates = [
-                    (
+                    creator_appearance = track_appearances[selected.track_id]
+
+            candidates = [
+                CreatorCandidate(
+                    track_id=track.track_id,
+                    detection_confidence=track.confidence,
+                    appearance_distance=(
                         appearance_distance(
                             creator_appearance,
-                            appearance_histogram(frame, track.bbox),
-                        ),
-                        track,
-                    )
-                    for track in tracks
-                ]
-                current = next(
-                    (
-                        candidate
-                        for candidate in candidates
-                        if candidate[1].track_id == creator_track_id
+                            track_appearances[track.track_id],
+                        )
+                        if creator_appearance is not None
+                        else None
                     ),
-                    None,
                 )
-                best = min(candidates, key=lambda candidate: candidate[0], default=None)
-
-                # If ByteTrack swaps IDs during a crossing, clothing appearance
-                # provides a second signal to recover the selected creator.
-                if best is not None and best[0] < 0.48:
-                    if current is None or current[0] > best[0] + 0.12:
-                        if creator_track_id != best[1].track_id:
-                            logger.info(
-                                "[%s] Creator track recovered: %s -> %s",
-                                job_id,
-                                creator_track_id,
-                                best[1].track_id,
-                            )
-                        creator_track_id = best[1].track_id
+                for track in tracks
+            ]
+            decision = select_creator_exemption(creator_track_id, candidates)
+            if decision.reason == "unique_appearance_recovery":
+                logger.info(
+                    "[%s] Creator track recovered with unique appearance "
+                    "evidence: %s -> %s",
+                    job_id,
+                    creator_track_id,
+                    decision.next_creator_track_id,
+                )
+            elif decision.reason == "conservative_fallback" and tracks:
+                conservative_fallback_frames += 1
+                if decision.fallback_detail != last_fallback_detail:
+                    logger.warning(
+                        "[%s] Conservative privacy fallback (%s); "
+                        "blurring all detected people",
+                        job_id,
+                        decision.fallback_detail,
+                    )
+                last_fallback_detail = decision.fallback_detail
+            else:
+                last_fallback_detail = None
+            creator_track_id = decision.next_creator_track_id
 
             for track in tracks:
-                if track.track_id == creator_track_id:
+                if track.track_id == decision.exempt_track_id:
                     continue
-                if mode == "blur":
+                if decision.exempt_track_id is None or mode == "blur":
                     blur_person(frame, track.bbox, blur_strength, track.mask)
                 else:
                     overlay_avatar(frame, track.bbox, avatar)
@@ -225,7 +320,12 @@ def process_video(
             if frame_number == 1 or frame_number % 10 == 0:
                 progress = min(99, int(frame_number / frame_count * 100))
                 message = f"Protecting frame {frame_number} of {frame_count}"
-                set_job(job_id, progress=progress, message=message)
+                set_job(
+                    job_id,
+                    progress=progress,
+                    message=message,
+                    conservative_fallback_frames=conservative_fallback_frames,
+                )
                 logger.info("[%s] %s (%d%%)", job_id, message, progress)
 
         if frame_number == 0:
@@ -235,57 +335,73 @@ def process_video(
         capture.release()
         capture = None
 
-        # OpenCV does not preserve audio. Reattach it when ffmpeg is available.
-        if shutil.which("ffmpeg"):
-            set_job(
-                job_id,
-                progress=99,
-                message=(
-                    "Finalizing 10-second preview"
-                    if process_scope == "preview"
-                    else "Finalizing video and audio"
-                ),
-            )
-            preferred_encoder = VIDEO_ENCODER
-            result = subprocess.run(
-                ffmpeg_command(temporary, source, output, preferred_encoder),
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0 and preferred_encoder != "libx264":
-                logger.warning(
-                    "%s encoding failed; retrying with libx264: %s",
-                    preferred_encoder,
-                    result.stderr[-500:],
-                )
-                result = subprocess.run(
-                    ffmpeg_command(temporary, source, output, "libx264"),
-                    capture_output=True,
-                    text=True,
-                )
-            if result.returncode != 0:
-                logger.warning("ffmpeg audio merge failed: %s", result.stderr[-500:])
-                temporary.replace(output)
-            else:
-                temporary.unlink(missing_ok=True)
-        else:
-            temporary.replace(output)
+        set_job(
+            job_id,
+            progress=99,
+            message=(
+                "Finalizing with source audio"
+                if audio_policy == "preserve"
+                else "Finalizing with audio removed"
+            ),
+            conservative_fallback_frames=conservative_fallback_frames,
+        )
+        audio_status = finalize_output(
+            temporary,
+            source,
+            output,
+            VIDEO_ENCODER,
+            audio_policy,
+        )
 
         set_job(
             job_id,
             status="complete",
             progress=100,
-            message=(
-                "Your 10-second preview is ready"
-                if process_scope == "preview"
-                else "Your privacy-safe video is ready"
-            ),
+            message=completion_message(process_scope, audio_status),
             output_url=f"/outputs/{output.name}",
             process_scope=process_scope,
+            audio_policy=audio_policy,
+            audio_status=audio_status,
+            conservative_fallback_frames=conservative_fallback_frames,
+        )
+    except AudioPreservationError as exc:
+        logger.exception("Audio preservation failed for job %s", job_id)
+        if writer is not None:
+            writer.release()
+            writer = None
+        if capture is not None:
+            capture.release()
+            capture = None
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        if output is not None:
+            output.unlink(missing_ok=True)
+        set_job(
+            job_id,
+            status="failed",
+            message=str(exc),
+            audio_policy=audio_policy,
+            audio_status="preserve_failed",
+            conservative_fallback_frames=conservative_fallback_frames,
         )
     except Exception as exc:
         logger.exception("Video processing failed for job %s", job_id)
-        set_job(job_id, status="failed", message=str(exc))
+        if writer is not None:
+            writer.release()
+            writer = None
+        if capture is not None:
+            capture.release()
+            capture = None
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        if output is not None:
+            output.unlink(missing_ok=True)
+        set_job(
+            job_id,
+            status="failed",
+            message=str(exc),
+            conservative_fallback_frames=conservative_fallback_frames,
+        )
     finally:
         if writer is not None:
             writer.release()
@@ -293,7 +409,10 @@ def process_video(
             capture.release()
 
 
-def create_job(process_scope: str = "full") -> str:
+def create_job(
+    process_scope: str = "full",
+    audio_policy: AudioPolicy = "remove",
+) -> str:
     job_id = uuid.uuid4().hex
     with jobs_lock:
         jobs[job_id] = {
@@ -303,5 +422,8 @@ def create_job(process_scope: str = "full") -> str:
             "message": "Waiting to process",
             "output_url": None,
             "process_scope": process_scope,
+            "audio_policy": audio_policy,
+            "audio_status": "pending",
+            "conservative_fallback_frames": 0,
         }
     return job_id

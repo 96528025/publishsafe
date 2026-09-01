@@ -10,6 +10,12 @@ from .tracker import Track
 
 logger = logging.getLogger(__name__)
 
+# Uncalibrated corruption guards only: these reject empty or obviously
+# degenerate masks. They do not establish that a mask has adequate person
+# coverage, which requires evaluation data this project does not yet have.
+MASK_CORRUPTION_GUARD_MIN_FOREGROUND_PIXELS = 16
+MASK_CORRUPTION_GUARD_MIN_REGION_FRACTION = 0.01
+
 
 class PersonDetector:
     def __init__(self) -> None:
@@ -215,12 +221,45 @@ def blur_person(
     kernel = min(151, max(15, kernel | 1))
     anonymized = cv2.GaussianBlur(anonymized, (kernel, kernel), 0)
 
-    if mask is None:
+    mask_region: np.ndarray | None = None
+    if mask is not None:
+        try:
+            mask_array = np.asarray(mask)
+            if (
+                mask_array.ndim == 2
+                and mask_array.size > 0
+                and np.issubdtype(mask_array.dtype, np.number)
+                and np.all(np.isfinite(mask_array))
+            ):
+                full_mask = cv2.resize(
+                    mask_array.astype(np.float32),
+                    (width, height),
+                    interpolation=cv2.INTER_NEAREST,
+                )
+                candidate_region = (full_mask[y1:y2, x1:x2] > 0.5).astype(
+                    np.uint8
+                )
+                foreground = int(np.count_nonzero(candidate_region))
+                minimum_foreground = max(
+                    MASK_CORRUPTION_GUARD_MIN_FOREGROUND_PIXELS,
+                    int(
+                        candidate_region.size
+                        * MASK_CORRUPTION_GUARD_MIN_REGION_FRACTION
+                    ),
+                )
+                if foreground >= minimum_foreground:
+                    mask_region = candidate_region
+        except Exception:
+            logger.warning(
+                "Invalid person mask; falling back to padded bounding-box blur",
+                exc_info=True,
+            )
+
+    # Missing, malformed, empty, or implausibly small masks must fail closed.
+    if mask_region is None:
         frame[y1:y2, x1:x2] = anonymized
         return
 
-    full_mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST)
-    mask_region = full_mask[y1:y2, x1:x2]
     dilation = max(3, int(min(region.shape[:2]) * 0.025)) | 1
     mask_region = cv2.dilate(
         mask_region,

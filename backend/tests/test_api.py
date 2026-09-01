@@ -78,6 +78,7 @@ def test_process_queues_a_job_and_dispatches_the_background_worker(
             "mode": "blur",
             "blur_strength": 75,
             "process_scope": "preview",
+            "audio_policy": "preserve",
         },
     )
 
@@ -87,10 +88,23 @@ def test_process_queues_a_job_and_dispatches_the_background_worker(
     assert body["progress"] == 0
     assert body["output_url"] is None
     assert body["process_scope"] == "preview"
+    assert body["audio_policy"] == "preserve"
+    assert body["audio_status"] == "pending"
+    assert body["conservative_fallback_frames"] == 0
 
     # The background task ran with the request's parameters, not defaults.
     assert len(calls) == 1
-    job_id, video_id, track_id, mode, _style, strength, scope, detector = calls[0]
+    (
+        job_id,
+        video_id,
+        track_id,
+        mode,
+        _style,
+        strength,
+        scope,
+        detector,
+        policy,
+    ) = calls[0]
     assert job_id == body["job_id"]
     assert (video_id, track_id, mode, strength, scope) == (
         VALID_VIDEO_ID,
@@ -100,6 +114,7 @@ def test_process_queues_a_job_and_dispatches_the_background_worker(
         "preview",
     )
     assert detector is stub_detector
+    assert policy == "preserve"
 
 
 def test_job_status_is_retrievable_after_the_job_is_queued(

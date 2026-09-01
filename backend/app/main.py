@@ -203,7 +203,7 @@ def start_processing(request: ProcessRequest, background_tasks: BackgroundTasks)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    job_id = create_job(request.process_scope)
+    job_id = create_job(request.process_scope, request.audio_policy)
 
     def locked_process() -> None:
         with detector_lock:
@@ -216,6 +216,7 @@ def start_processing(request: ProcessRequest, background_tasks: BackgroundTasks)
                 request.blur_strength,
                 request.process_scope,
                 detector,
+                request.audio_policy,
             )
 
     background_tasks.add_task(locked_process)
