@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "model": {
+    "name": "synthetic-fixture",
+    "version": "1.0",
+    "runner": "hand-authored-unit-test-fixture"
+  },
+  "videos": [
+    {
+      "video_id": "synthetic-four-frame-video",
+      "frames": [
+        {
+          "frame_index": 0,
+          "redactions": [
+            {"bbox": [0, 0, 10, 10], "confidence": 0.99},
+            {"bbox": [20, 0, 30, 10], "confidence": 0.90}
+          ]
+        },
+        {
+          "frame_index": 1,
+          "redactions": [
+            {"bbox": [41, 0, 51, 10], "confidence": 0.88}
+          ]
+        },
+        {"frame_index": 2, "redactions": []},
+        {
+          "frame_index": 3,
+          "redactions": [
+            {"bbox": [23, 0, 33, 10], "confidence": 0.91}
+          ]
+        }
+      ]
+    }
+  ]
+}

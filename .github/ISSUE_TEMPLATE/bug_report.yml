@@ -1,0 +1,67 @@
+name: Bug report
+description: Report a reproducible PublishSafe defect without sharing sensitive media.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never upload or link private, identifying, confidential, or unlicensed video, audio, frames, masks, outputs, or logs.** Use generated geometry or public, properly licensed sample media. Report security-sensitive problems through a private Security Advisory instead.
+  - type: checkboxes
+    id: safe_report
+    attributes:
+      label: Sensitive-media check
+      options:
+        - label: I removed private media, identifying details, credentials, tokens, paths, and unredacted logs from this report.
+          required: true
+        - label: This report is not an unpatched security or privacy vulnerability.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Provide the release or commit hash where the issue occurs.
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime
+      options:
+        - Docker Compose
+        - Run from source
+        - Maintainer owner mode
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Sanitized reproduction
+      description: Use the repository sample or synthetic/non-identifying data. Do not request a media-upload channel.
+      placeholder: List the smallest deterministic steps and safe fixture needed to reproduce the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Sanitized environment details
+      description: Include OS, Python/Node versions, CPU/GPU, and relevant configuration. Remove usernames and local paths.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs (optional)
+      description: Paste only the minimal excerpt after removing media names, paths, identities, tokens, and credentials.

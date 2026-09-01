@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose an improvement without sharing sensitive media.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not upload or link private, identifying, confidential, or unlicensed media. Describe the use case with synthetic or public, properly licensed examples.
+  - type: checkboxes
+    id: safe_report
+    attributes:
+      label: Sensitive-media check
+      options:
+        - label: I removed private media, identifying details, credentials, tokens, paths, and unredacted logs from this request.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user need is unmet? Describe it without identifying people or footage.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the desired result and its privacy/security implications.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

@@ -1,4 +1,36 @@
-# PublishSafe v0.1.0
+# PublishSafe release notes
+
+## Unreleased — evaluation and documentation hardening
+
+- Replaced raw upload/output routes with video-scoped bearer APIs and
+  five-minute HMAC-signed derived-media URLs carrying private/no-store headers.
+- Added a default 24-hour media-session TTL, early `DELETE`, restricted file
+  permissions, and localhost-only Compose binding. These are local capability
+  controls, not multi-user authentication, TLS, or secure erase.
+- Changed the default audio policy to removal. Explicit preservation fails the
+  job if it cannot be honored instead of silently changing policy.
+- Added conservative padded-box fallback for obviously corrupt/missing masks
+  and blur-all-detected-people fallback for ambiguous creator ReID. The guard
+  thresholds are defensive and uncalibrated, not measured privacy guarantees.
+- Added a model-independent privacy evaluation harness for annotated ground
+  truth and redaction-candidate predictions.
+- Added deterministic maximum-cardinality matching, person recall, longest
+  consecutive missed-redaction runs per ground-truth person/track, and explicit
+  `occlusion`, `low_light`, `crowd`, and `profile` slices.
+- Added synthetic fixture tests that validate metric calculations only. They are
+  not model-performance results and no real-video benchmark is claimed.
+- Added an optional YOLO prediction runner whose documented scope is detector
+  box coverage, not the complete PublishSafe render pipeline.
+- Added dataset consent/licensing guidance, a threat model, a full-video human
+  review checklist, sensitive-media reporting rules, and safe issue forms.
+- Reordered the README around a recruiter review path and separated automated
+  evidence from unverified ML, privacy, performance, and deployment claims.
+
+The evaluation/documentation work itself does not alter runtime behavior; the
+runtime controls above are separately implemented in the same unreleased
+hardening set. No release or tag has been created for it.
+
+## v0.1.0
 
 Initial public MVP release.
 
@@ -8,7 +40,7 @@ Initial public MVP release.
 - YOLOv8n-seg person detection and instance masks
 - ByteTrack person IDs with creator appearance recovery
 - Select one creator to preserve
-- Adjustable 10-100 privacy blur
+- Adjustable person-mask blur control
 - Instant single-frame effect preview
 - Faster 10-second video preview
 - Experimental mascot avatar mode
@@ -18,5 +50,9 @@ Initial public MVP release.
 
 - Full-resolution processing is CPU intensive and can be slow on 4K footage.
 - Tracking can fail after long occlusions or when people wear similar clothing.
-- Avatar overlays still use bounding boxes.
+- Blur is weak de-identification, and avatar overlays still use bounding boxes.
+- Audio, text, plates, reflections, gait, clothing, and context are not
+  automatically de-identified.
+- Detection, masks, and tracking can miss people or expose frames; human review
+  of the complete export is required.
 - This release is intended for local use, not direct public internet exposure.

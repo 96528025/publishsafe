@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="260" viewBox="0 0 1100 260">
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="300" viewBox="0 0 1100 300">
   <defs>
     <style>
       .title { font: 700 20px Arial, sans-serif; fill: #172032; }
@@ -10,7 +10,7 @@
       <polygon points="0 0, 10 3.5, 0 7" fill="#172032"/>
     </marker>
   </defs>
-  <rect width="1100" height="260" fill="#f7f5f0"/>
+  <rect width="1100" height="300" fill="#f7f5f0"/>
   <rect class="box" x="30" y="72" width="170" height="110"/>
   <text class="title" x="115" y="112" text-anchor="middle">React UI</text>
   <text class="text" x="115" y="142" text-anchor="middle">Upload + select</text>
@@ -18,21 +18,23 @@
   <path class="arrow" d="M200 127 H245"/>
   <rect class="box" x="250" y="72" width="170" height="110"/>
   <text class="title" x="335" y="112" text-anchor="middle">FastAPI</text>
-  <text class="text" x="335" y="142" text-anchor="middle">Jobs + progress</text>
-  <text class="text" x="335" y="165" text-anchor="middle">Local storage</text>
+  <text class="text" x="335" y="142" text-anchor="middle">Scoped API + jobs</text>
+  <text class="text" x="335" y="165" text-anchor="middle">Private sessions + TTL</text>
   <path class="arrow" d="M420 127 H465"/>
   <rect class="box" x="470" y="72" width="170" height="110"/>
   <text class="title" x="555" y="112" text-anchor="middle">YOLOv8n-seg</text>
-  <text class="text" x="555" y="142" text-anchor="middle">Person masks</text>
-  <text class="text" x="555" y="165" text-anchor="middle">No face identity</text>
+  <text class="text" x="555" y="142" text-anchor="middle">Person candidates</text>
+  <text class="text" x="555" y="165" text-anchor="middle">Masks when present</text>
   <path class="arrow" d="M640 127 H685"/>
   <rect class="box" x="690" y="72" width="170" height="110"/>
   <text class="title" x="775" y="112" text-anchor="middle">ByteTrack</text>
-  <text class="text" x="775" y="142" text-anchor="middle">Stable person IDs</text>
-  <text class="text" x="775" y="165" text-anchor="middle">Creator recovery</text>
+  <text class="text" x="775" y="142" text-anchor="middle">Temporal track IDs</text>
+  <text class="text" x="775" y="165" text-anchor="middle">Appearance heuristic</text>
   <path class="arrow" d="M860 127 H905"/>
   <rect class="box" x="910" y="72" width="160" height="110"/>
   <text class="title" x="990" y="112" text-anchor="middle">OpenCV</text>
-  <text class="text" x="990" y="142" text-anchor="middle">Mask blur</text>
-  <text class="text" x="990" y="165" text-anchor="middle">FFmpeg MP4</text>
+  <text class="text" x="990" y="142" text-anchor="middle">Mask / box render</text>
+  <text class="text" x="990" y="165" text-anchor="middle">Optional audio mux</text>
+  <text class="text" x="550" y="230" text-anchor="middle">Local redaction aid: detection, tracking, and masks can fail; review the complete export.</text>
+  <text class="text" x="550" y="254" text-anchor="middle">Video-scoped bearer APIs + short-lived derived-media links; local capability control is not multi-user auth.</text>
 </svg>

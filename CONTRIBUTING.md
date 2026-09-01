@@ -1,6 +1,6 @@
 # Contributing to PublishSafe
 
-Thanks for helping improve privacy-preserving video publishing.
+Thanks for helping improve this local video-redaction and review prototype.
 
 ## Development setup
 
@@ -31,7 +31,8 @@ npm run dev
 ## Before opening a pull request
 
 - Keep changes focused.
-- Do not commit private or identifying videos.
+- Do not commit or attach private, identifying, confidential, or unlicensed
+  video, audio, frames, masks, outputs, filenames/paths, or unredacted logs.
 - Use the public sample generator or synthetic test clips.
 - Run `python -m compileall backend/app`.
 - Run `npm run build` from `frontend/`.
@@ -49,5 +50,7 @@ npm run dev
 
 ## Privacy
 
-Issues and pull requests must not include videos of people without permission.
-Use public-domain, appropriately licensed, or synthetic media.
+Issues and pull requests must not include private media or media of people
+without permission. Use generated geometry, public-domain material, or media
+whose license and participant consent permit the exact use. Report
+vulnerabilities privately according to [SECURITY.md](SECURITY.md).
