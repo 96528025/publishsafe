@@ -7,6 +7,10 @@ PublishSafe's own validation, dispatch, and error handling — not inference.
 VALID_VIDEO_ID = "0123456789abcdef" * 2
 
 
+def authorized(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_health_reports_loading_until_the_detector_is_constructed(api):
     response = api.get("/api/health")
 
@@ -42,10 +46,14 @@ def test_upload_rejects_a_video_extension_that_is_not_allowed(api, upload_dir):
     assert list(upload_dir.iterdir()) == []
 
 
-def test_process_returns_404_when_the_video_id_has_no_uploaded_file(api, stub_detector):
+def test_process_returns_404_when_the_video_id_has_no_uploaded_file(
+    api, stub_detector, video_session
+):
+    _directory, token = video_session(VALID_VIDEO_ID, with_source=False)
     response = api.post(
         "/api/process",
         json={"video_id": VALID_VIDEO_ID, "selected_track_id": 1},
+        headers=authorized(token),
     )
 
     assert response.status_code == 404
@@ -62,13 +70,17 @@ def test_process_rejects_a_malformed_request_before_touching_storage(api, stub_d
 
 
 def test_process_queues_a_job_and_dispatches_the_background_worker(
-    api, stub_detector, upload_dir, monkeypatch
+    api, stub_detector, video_session, monkeypatch
 ):
     from app import main
 
-    (upload_dir / f"{VALID_VIDEO_ID}.mp4").write_bytes(b"fake video bytes")
+    _directory, token = video_session(VALID_VIDEO_ID)
     calls = []
-    monkeypatch.setattr(main, "process_video", lambda *args: calls.append(args))
+    monkeypatch.setattr(
+        main,
+        "process_video",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
 
     response = api.post(
         "/api/process",
@@ -78,7 +90,9 @@ def test_process_queues_a_job_and_dispatches_the_background_worker(
             "mode": "blur",
             "blur_strength": 75,
             "process_scope": "preview",
+            "audio_policy": "preserve",
         },
+        headers=authorized(token),
     )
 
     assert response.status_code == 200
@@ -87,10 +101,24 @@ def test_process_queues_a_job_and_dispatches_the_background_worker(
     assert body["progress"] == 0
     assert body["output_url"] is None
     assert body["process_scope"] == "preview"
+    assert body["audio_policy"] == "preserve"
+    assert body["audio_status"] == "pending"
+    assert body["conservative_fallback_frames"] == 0
 
     # The background task ran with the request's parameters, not defaults.
     assert len(calls) == 1
-    job_id, video_id, track_id, mode, _style, strength, scope, detector = calls[0]
+    call_args, call_kwargs = calls[0]
+    (
+        job_id,
+        video_id,
+        track_id,
+        mode,
+        _style,
+        strength,
+        scope,
+        detector,
+        policy,
+    ) = call_args
     assert job_id == body["job_id"]
     assert (video_id, track_id, mode, strength, scope) == (
         VALID_VIDEO_ID,
@@ -100,42 +128,49 @@ def test_process_queues_a_job_and_dispatches_the_background_worker(
         "preview",
     )
     assert detector is stub_detector
+    assert policy == "preserve"
+    assert call_kwargs["creator_appearance"].size > 0
 
 
 def test_job_status_is_retrievable_after_the_job_is_queued(
-    api, stub_detector, upload_dir, monkeypatch
+    api, stub_detector, video_session, monkeypatch
 ):
     from app import main
 
-    (upload_dir / f"{VALID_VIDEO_ID}.mp4").write_bytes(b"fake video bytes")
-    monkeypatch.setattr(main, "process_video", lambda *args: None)
+    _directory, token = video_session(VALID_VIDEO_ID)
+    monkeypatch.setattr(main, "process_video", lambda *args, **kwargs: None)
 
     job_id = api.post(
         "/api/process",
         json={"video_id": VALID_VIDEO_ID, "selected_track_id": 1},
+        headers=authorized(token),
     ).json()["job_id"]
 
-    status = api.get(f"/api/jobs/{job_id}")
+    status = api.get(f"/api/jobs/{job_id}", headers=authorized(token))
     assert status.status_code == 200
     assert status.json()["job_id"] == job_id
 
 
-def test_job_status_returns_404_for_an_unknown_job(api):
-    response = api.get("/api/jobs/does-not-exist")
+def test_job_status_returns_404_for_an_unknown_job(api, video_session):
+    _directory, token = video_session(VALID_VIDEO_ID)
+    response = api.get("/api/jobs/does-not-exist", headers=authorized(token))
 
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
 
 
-def test_frame_preview_returns_404_when_the_source_video_is_missing(api):
+def test_frame_preview_returns_404_when_the_source_video_is_missing(
+    api, video_session
+):
+    _directory, token = video_session(VALID_VIDEO_ID, with_source=False)
     response = api.post(
         "/api/frame-preview",
         json={
             "video_id": VALID_VIDEO_ID,
             "selected_track_id": 1,
             "blur_strength": 40,
-            "people": [],
         },
+        headers=authorized(token),
     )
 
     assert response.status_code == 404

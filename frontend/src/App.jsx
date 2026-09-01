@@ -20,13 +20,28 @@ const avatarOptions = [
   { id: "bloom", name: "Bloom", note: "Fresh & friendly" },
 ];
 
+async function fetchJobStatus(jobId, sessionCapability) {
+  const response = await fetch(`${API}/api/jobs/${jobId}`, {
+    headers: { Authorization: `Bearer ${sessionCapability}` },
+  });
+  const nextJob = await response.json();
+  if (!response.ok) throw new Error(nextJob.detail || "Could not refresh processing status");
+  return nextJob;
+}
+
 function App() {
   const inputRef = useRef(null);
+  const videoRef = useRef(null);
+  const mediaRetryRef = useRef(0);
+  const previewRetryRef = useRef(0);
+  const resumePlaybackRef = useRef(null);
+  const resettingRef = useRef(false);
   const [upload, setUpload] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [avatar, setAvatar] = useState("sunny");
   const [mode, setMode] = useState("blur");
   const [blurStrength, setBlurStrength] = useState(40);
+  const [audioPolicy, setAudioPolicy] = useState("remove");
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState(null);
   const [error, setError] = useState("");
@@ -46,8 +61,7 @@ function App() {
     if (!job?.job_id || ["complete", "failed"].includes(job.status)) return;
     const timer = setInterval(async () => {
       try {
-        const response = await fetch(`${API}/api/jobs/${job.job_id}`);
-        const nextJob = await response.json();
+        const nextJob = await fetchJobStatus(job.job_id, upload.session_capability);
         setJob(nextJob);
         if (nextJob.status === "failed") setError(nextJob.message);
       } catch {
@@ -55,7 +69,7 @@ function App() {
       }
     }, 1000);
     return () => clearInterval(timer);
-  }, [job?.job_id, job?.status]);
+  }, [job?.job_id, job?.status, upload?.session_capability]);
 
   useEffect(() => {
     if (!upload || !selectedId || mode !== "blur") {
@@ -69,17 +83,20 @@ function App() {
       try {
         const response = await fetch(`${API}/api/frame-preview`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${upload.session_capability}`,
+          },
           signal: controller.signal,
           body: JSON.stringify({
             video_id: upload.video_id,
             selected_track_id: selectedId,
             blur_strength: blurStrength,
-            people: upload.people,
           }),
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || "Could not create frame preview");
+        previewRetryRef.current = 0;
         setFramePreviewUrl(`${API}${data.preview_url}`);
       } catch (previewError) {
         if (previewError.name !== "AbortError") setError(previewError.message);
@@ -127,7 +144,10 @@ function App() {
     try {
       const response = await fetch(`${API}/api/process`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${upload.session_capability}`,
+        },
         body: JSON.stringify({
           video_id: upload.video_id,
           selected_track_id: selectedId,
@@ -135,6 +155,7 @@ function App() {
           mode,
           blur_strength: blurStrength,
           process_scope: processScope,
+          audio_policy: audioPolicy,
         }),
       });
       const data = await response.json();
@@ -147,12 +168,118 @@ function App() {
     }
   }
 
-  function reset() {
+  async function downloadOutput(event) {
+    event.preventDefault();
+    try {
+      const refreshedJob = await fetchJobStatus(job.job_id, upload.session_capability);
+      setJob(refreshedJob);
+      if (!refreshedJob.output_url) throw new Error("The processed video is no longer available.");
+      const link = document.createElement("a");
+      link.href = `${API}${refreshedJob.output_url}?download=1`;
+      link.download = "publishsafe-output.mp4";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (downloadError) {
+      setError(downloadError.message);
+    }
+  }
+
+  async function refreshOutputAfterError() {
+    if (mediaRetryRef.current >= 1) {
+      setError("The video link could not be refreshed. Try Download to request a new link.");
+      return;
+    }
+    mediaRetryRef.current += 1;
+    const player = videoRef.current;
+    resumePlaybackRef.current = {
+      currentTime: player?.currentTime || 0,
+      shouldPlay: Boolean(player && !player.paused),
+    };
+    try {
+      const refreshedJob = await fetchJobStatus(job.job_id, upload.session_capability);
+      if (!refreshedJob.output_url) throw new Error("The processed video is no longer available.");
+      setJob(refreshedJob);
+    } catch (refreshError) {
+      setError(refreshError.message);
+    }
+  }
+
+  function resumeRefreshedOutput() {
+    const resume = resumePlaybackRef.current;
+    const player = videoRef.current;
+    if (!resume || !player) return;
+    player.currentTime = resume.currentTime;
+    if (resume.shouldPlay) player.play().catch(() => {});
+    resumePlaybackRef.current = null;
+    mediaRetryRef.current = 0;
+  }
+
+  async function refreshPreviewAfterError() {
+    if (!upload || previewRetryRef.current >= 1) {
+      setError("The short-lived preview could not be refreshed. Upload the video again.");
+      return;
+    }
+    previewRetryRef.current += 1;
+    const variant = framePreviewUrl ? "frame" : "detected";
+    try {
+      const response = await fetch(
+        `${API}/api/videos/${upload.video_id}/preview-capability?variant=${variant}`,
+        { headers: { Authorization: `Bearer ${upload.session_capability}` } },
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Could not refresh the preview");
+      if (variant === "frame") {
+        setFramePreviewUrl(`${API}${data.preview_url}`);
+      } else {
+        setUpload((current) => ({ ...current, preview_url: data.preview_url }));
+      }
+    } catch (refreshError) {
+      setError(refreshError.message);
+    }
+  }
+
+  function clearLocalSession() {
     setUpload(null);
     setSelectedId(null);
     setJob(null);
     setError("");
+    setFramePreviewUrl("");
+    setAudioPolicy("remove");
+    mediaRetryRef.current = 0;
+    previewRetryRef.current = 0;
     if (inputRef.current) inputRef.current.value = "";
+  }
+
+  async function reset(event) {
+    event?.preventDefault?.();
+    if (!upload?.session_capability) {
+      clearLocalSession();
+      return;
+    }
+    if (resettingRef.current) return;
+    resettingRef.current = true;
+    setError("");
+    try {
+      const response = await fetch(`${API}/api/videos/${upload.video_id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${upload.session_capability}` },
+      });
+      if (!response.ok && response.status !== 404) {
+        let detail = "";
+        try {
+          detail = (await response.json()).detail;
+        } catch {
+          detail = "";
+        }
+        throw new Error(detail || "The server did not confirm deletion");
+      }
+      clearLocalSession();
+    } catch (deleteError) {
+      setError(`${deleteError.message}. Deletion was not confirmed; private media remains subject to the 24-hour TTL.`);
+    } finally {
+      resettingRef.current = false;
+    }
   }
 
   return (
@@ -162,21 +289,21 @@ function App() {
           <span className="brand-mark"><ShieldCheck size={23} /></span>
           <span>PublishSafe</span>
         </a>
-        <div className="privacy-pill"><LockKeyhole size={14} /> Local-first privacy</div>
+        <div className="privacy-pill"><LockKeyhole size={14} /> Runs on this host</div>
       </header>
 
       <main>
         <section className="hero">
-          <div className="eyebrow"><Sparkles size={15} /> Made for creators, built for consent</div>
-          <h1>Share the moment.<br /><em>Protect the crowd.</em></h1>
-          <p>Keep yourself visible while automatically blurring everyone else with privacy-aware person masks.</p>
+          <div className="eyebrow"><Sparkles size={15} /> Local video-redaction prototype</div>
+          <h1>Keep the creator.<br /><em>Review every redaction.</em></h1>
+          <p>Select one person to leave visible and obscure other detected people. Detection can miss—review the entire export before sharing.</p>
         </section>
 
         <nav className="steps" aria-label="Workflow progress">
           {[
             [1, "Upload"],
-            [2, "Choose yourself"],
-            [3, "Publish safely"],
+            [2, "Choose a creator"],
+            [3, "Review output"],
           ].map(([number, label], index) => (
             <div className="step-wrap" key={number}>
               <div className={`step ${stage >= number ? "active" : ""}`}>
@@ -212,16 +339,16 @@ function App() {
               <div className="upload-icon">
                 {busy ? <LoaderCircle className="spin" size={30} /> : <Upload size={30} />}
               </div>
-              <h2>{busy ? "Finding people in your video..." : "Drop your dance video here"}</h2>
+              <h2>{busy ? "Finding person candidates..." : "Drop a creator video here"}</h2>
               <p>MP4, MOV, AVI, MKV, or WebM up to 500 MB</p>
               <button className="primary small" disabled={busy}>
                 {busy ? "Analyzing preview" : "Choose a video"}
               </button>
             </div>
             <div className="trust-row">
-              <span><LockKeyhole size={16} /> Stored locally</span>
-              <span><Eye size={16} /> No facial recognition</span>
-              <span><Users size={16} /> People detection only</span>
+              <span><LockKeyhole size={16} /> Source file has no direct route; previews are short-lived</span>
+              <span><Eye size={16} /> Audio removed by default</span>
+              <span><Users size={16} /> Detection + tracking, not identity proof</span>
             </div>
           </section>
         )}
@@ -232,7 +359,7 @@ function App() {
               <div className="panel-heading">
                 <div>
                   <span className="section-label">Preview</span>
-                  <h2>Which person is you?</h2>
+                  <h2>Who may remain visible?</h2>
                 </div>
                 <button className="text-button" onClick={reset}>Change video</button>
               </div>
@@ -240,6 +367,8 @@ function App() {
                 <img
                   src={framePreviewUrl || `${API}${upload.preview_url}`}
                   alt={framePreviewUrl ? "Blur effect frame preview" : "Detected people preview"}
+                  onError={refreshPreviewAfterError}
+                  onLoad={() => { previewRetryRef.current = 0; }}
                 />
                 {people.map((person) => {
                   const [x1, y1, x2, y2] = person.bbox;
@@ -260,8 +389,10 @@ function App() {
                 })}
                 <div className="preview-caption">
                   {framePreviewBusy
-                    ? <><LoaderCircle className="spin" size={16} /> Updating blur preview...</>
-                    : <><ShieldCheck size={16} /> Selected creator preserved. Other people protected.</>}
+                    ? <><LoaderCircle className="spin" size={16} /> Updating one-frame preview...</>
+                    : mode === "avatar"
+                      ? <><ShieldCheck size={16} /> Detection preview only; avatar placement appears in the render.</>
+                      : <><ShieldCheck size={16} /> One-frame sample only; full-video tracking can differ.</>}
                 </div>
               </div>
               {people.length === 0 ? (
@@ -276,7 +407,7 @@ function App() {
                     >
                       <span className="person-number">{person.track_id}</span>
                       <span>Person {person.track_id}</span>
-                      {selectedId === person.track_id && <span className="you-tag">This is me <Check size={13} /></span>}
+                      {selectedId === person.track_id && <span className="you-tag">Selected <Check size={13} /></span>}
                     </button>
                   ))}
                 </div>
@@ -284,8 +415,8 @@ function App() {
             </div>
 
             <aside className="settings-panel">
-              <span className="section-label">Protection style</span>
-              <h2>Cover everyone else</h2>
+              <span className="section-label">Redaction style</span>
+              <h2>Obscure other detections</h2>
               <div className="mode-switch">
                 <button className={mode === "blur" ? "active" : ""} onClick={() => setMode("blur")}>
                   <Eye size={17} /> Blur
@@ -296,25 +427,28 @@ function App() {
               </div>
 
               {mode === "avatar" && (
-                <div className="avatar-grid">
-                  {avatarOptions.map((option) => (
-                    <button
-                      key={option.id}
-                      className={avatar === option.id ? "selected" : ""}
-                      onClick={() => setAvatar(option.id)}
-                    >
-                      <img src={`${API}/avatars/${option.id}.png`} alt="" />
-                      <span><strong>{option.name}</strong><small>{option.note}</small></span>
-                      {avatar === option.id && <Check className="avatar-check" size={14} />}
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div className="avatar-grid">
+                    {avatarOptions.map((option) => (
+                      <button
+                        key={option.id}
+                        className={avatar === option.id ? "selected" : ""}
+                        onClick={() => setAvatar(option.id)}
+                      >
+                        <img src={`${API}/avatars/${option.id}.png`} alt="" />
+                        <span><strong>{option.name}</strong><small>{option.note}</small></span>
+                        {avatar === option.id && <Check className="avatar-check" size={14} />}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mode-warning">Avatar mode is an experimental visual effect, not a stronger anonymity mode.</p>
+                </>
               )}
 
               {mode === "blur" && (
                 <div className="blur-control">
                   <div className="blur-control-heading">
-                    <span><strong>Blur strength</strong><small>Choose how much identity detail to remove</small></span>
+                    <span><strong>Blur strength</strong><small>Adjust visual obstruction; blur cannot guarantee anonymity</small></span>
                     <output>{blurStrength}%</output>
                   </div>
                   <input
@@ -327,19 +461,43 @@ function App() {
                     aria-label="Blur strength"
                   />
                   <div className="range-labels">
-                    <span>Gentle</span>
-                    <span>Balanced</span>
-                    <span>Maximum</span>
+                    <span>Light</span>
+                    <span>Stronger</span>
+                    <span>Strongest</span>
                   </div>
                   <p className="slider-hint">The frame preview updates automatically when you move the slider.</p>
                 </div>
               )}
 
+              <fieldset className="audio-control">
+                <legend>Audio in export</legend>
+                <label className={audioPolicy === "remove" ? "selected" : ""}>
+                  <input
+                    type="radio"
+                    name="audio-policy"
+                    value="remove"
+                    checked={audioPolicy === "remove"}
+                    onChange={() => setAudioPolicy("remove")}
+                  />
+                  <span><strong>Remove audio (recommended)</strong><small>Avoid carrying voices, names, and conversations into the export.</small></span>
+                </label>
+                <label className={audioPolicy === "preserve" ? "selected warning" : "warning"}>
+                  <input
+                    type="radio"
+                    name="audio-policy"
+                    value="preserve"
+                    checked={audioPolicy === "preserve"}
+                    onChange={() => setAudioPolicy("preserve")}
+                  />
+                  <span><strong>Preserve source audio</strong><small>Explicit opt-in: sound may identify people or places.</small></span>
+                </label>
+              </fieldset>
+
               <div className="privacy-summary">
                 <ShieldCheck size={22} />
                 <div>
-                  <strong>Privacy mode is on</strong>
-                  <span>{selectedPerson ? `Person ${selectedId} stays visible.` : "Choose yourself in the preview."} Everyone else is protected.</span>
+                  <strong>Conservative fallback is enabled</strong>
+                  <span>{selectedPerson ? `Person ${selectedId} is the requested exemption.` : "Choose the creator in the preview."} Ambiguous tracking blurs every detected person, but detector misses remain possible.</span>
                 </div>
               </div>
 
@@ -347,6 +505,9 @@ function App() {
                 <div className="progress-block">
                   <div><span>{job.message}</span><strong>{job.progress}%</strong></div>
                   <progress value={job.progress} max="100" />
+                  {job.conservative_fallback_frames > 0 && (
+                    <p className="fallback-note">Blur-all fallback used on {job.conservative_fallback_frames} processed frame{job.conservative_fallback_frames === 1 ? "" : "s"}. Review those transitions carefully.</p>
+                  )}
                 </div>
               )}
 
@@ -370,7 +531,7 @@ function App() {
                     : <><Sparkles size={19} /> Process full video</>}
                 </button>
               </div>
-              <p className="fine-print">Test the first 10 seconds before committing to the full video.</p>
+              <p className="fine-print">The short preview is a tuning aid, not approval to publish.</p>
             </aside>
           </section>
         )}
@@ -379,35 +540,49 @@ function App() {
           <section className="complete-card">
             <div className="complete-icon"><Check size={34} /></div>
             <span className="section-label">
-              {job.process_scope === "preview" ? "Effect preview" : "Ready to share"}
+              {job.process_scope === "preview" ? "Motion preview" : "Review required"}
             </span>
             <h2>
               {job.process_scope === "preview"
-                ? "How does this protection look?"
-                : "Your protected video is ready"}
+                ? "Inspect this short render"
+                : "Your processed video is ready to inspect"}
             </h2>
             <p>
               {job.process_scope === "preview"
-                ? "Review the first 10 seconds. You can adjust the style or process the full video."
-                : "You stay visible. Everyone else follows your selected privacy style."}
+                ? "Use it to tune the effect, then review the complete render separately."
+                : `Watch the entire file before sharing. Audio was ${job.audio_status === "preserved" ? "preserved by explicit choice" : "removed"}; people, masks, text, reflections, and context still need review.`}
             </p>
-            <video controls src={`${API}${job.output_url}`} />
+            {job.conservative_fallback_frames > 0 && (
+              <p className="fallback-note">Blur-all fallback was used on {job.conservative_fallback_frames} processed frame{job.conservative_fallback_frames === 1 ? "" : "s"}. Inspect those transitions and the surrounding frames.</p>
+            )}
+            <video
+              ref={videoRef}
+              controls
+              src={`${API}${job.output_url}`}
+              onError={refreshOutputAfterError}
+              onCanPlay={resumeRefreshedOutput}
+            />
             <div className="complete-actions">
-              <a className="primary" href={`${API}${job.output_url}`} download>
-                <Download size={18} /> Download {job.process_scope === "preview" ? "preview" : "MP4"}
+              <a
+                className="primary"
+                href={`${API}${job.output_url}?download=1`}
+                download="publishsafe-output.mp4"
+                onClick={downloadOutput}
+              >
+                <Download size={18} /> Download {job.process_scope === "preview" ? "preview" : "review copy"}
               </a>
               {job.process_scope === "preview" ? (
                 <button className="primary" onClick={() => processVideo("full")}>
-                  <Sparkles size={18} /> Looks good, process full video
+                  <Sparkles size={18} /> Continue to full render
                 </button>
               ) : (
-                <button className="secondary" onClick={reset}>Protect another video</button>
+                <button className="secondary" onClick={reset}>Process another video</button>
               )}
             </div>
           </section>
         )}
       </main>
-      <footer>PublishSafe <span>•</span> Privacy that moves with you</footer>
+      <footer>PublishSafe <span>•</span> Local-first redaction prototype <span>•</span> Human review required</footer>
     </div>
   );
 }

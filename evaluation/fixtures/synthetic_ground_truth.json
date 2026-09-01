@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "dataset": {
+    "name": "synthetic-metric-fixture",
+    "version": "1.0",
+    "license": "CC0-1.0",
+    "source": "Repository-generated geometric fixture; contains no media or person data"
+  },
+  "videos": [
+    {
+      "video_id": "synthetic-four-frame-video",
+      "frame_count": 4,
+      "fps": 2.0,
+      "scene_tags": ["synthetic"],
+      "frames": [
+        {
+          "frame_index": 0,
+          "scene_tags": ["crowd", "low_light"],
+          "people": [
+            {"person_id": "creator", "bbox": [0, 0, 10, 10], "should_redact": false, "scene_tags": []},
+            {"person_id": "bystander-a", "bbox": [20, 0, 30, 10], "should_redact": true, "scene_tags": []},
+            {"person_id": "bystander-b", "bbox": [40, 0, 50, 10], "should_redact": true, "scene_tags": []}
+          ]
+        },
+        {
+          "frame_index": 1,
+          "scene_tags": ["crowd", "occlusion"],
+          "people": [
+            {"person_id": "bystander-a", "bbox": [21, 0, 31, 10], "should_redact": true, "scene_tags": ["profile"]},
+            {"person_id": "bystander-b", "bbox": [41, 0, 51, 10], "should_redact": true, "scene_tags": []}
+          ]
+        },
+        {
+          "frame_index": 2,
+          "scene_tags": ["occlusion"],
+          "people": [
+            {"person_id": "bystander-a", "bbox": [22, 0, 32, 10], "should_redact": true, "scene_tags": ["profile"]}
+          ]
+        },
+        {
+          "frame_index": 3,
+          "scene_tags": ["low_light"],
+          "people": [
+            {"person_id": "bystander-a", "bbox": [23, 0, 33, 10], "should_redact": true, "scene_tags": []}
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PersonPreview(BaseModel):
@@ -11,6 +11,8 @@ class PersonPreview(BaseModel):
 
 class UploadResponse(BaseModel):
     video_id: str
+    session_capability: str
+    expires_at: int
     filename: str
     preview_url: str
     people: list[PersonPreview]
@@ -27,13 +29,15 @@ class ProcessRequest(BaseModel):
     avatar_style: Literal["sunny", "cosmo", "bloom"] = "sunny"
     blur_strength: int = Field(default=40, ge=10, le=100)
     process_scope: Literal["preview", "full"] = "full"
+    audio_policy: Literal["remove", "preserve"] = "remove"
 
 
 class FramePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     video_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     selected_track_id: int = Field(ge=1)
     blur_strength: int = Field(default=40, ge=10, le=100)
-    people: list[PersonPreview]
 
 
 class FramePreviewResponse(BaseModel):
@@ -47,3 +51,8 @@ class JobResponse(BaseModel):
     message: str
     output_url: str | None = None
     process_scope: Literal["preview", "full"] = "full"
+    audio_policy: Literal["remove", "preserve"] = "remove"
+    audio_status: Literal[
+        "pending", "removed", "preserved", "preserve_failed"
+    ] = "pending"
+    conservative_fallback_frames: int = 0

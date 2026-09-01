@@ -53,6 +53,7 @@ def test_process_request_rejects_blur_strength_outside_10_to_100(blur_strength):
         {"mode": "cartoon"},
         {"avatar_style": "neon"},
         {"process_scope": "half"},
+        {"audio_policy": "copy-if-possible"},
         {"selected_track_id": 0},
         {"selected_track_id": -3},
     ],
@@ -66,3 +67,8 @@ def test_process_request_defaults_match_the_documented_behaviour():
     request = build_request()
     assert (request.mode, request.avatar_style) == ("avatar", "sunny")
     assert (request.blur_strength, request.process_scope) == (40, "full")
+    assert request.audio_policy == "remove"
+
+
+def test_process_request_requires_an_explicit_preserve_policy():
+    assert build_request(audio_policy="preserve").audio_policy == "preserve"

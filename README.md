@@ -4,22 +4,164 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Privacy-preserving video publishing for creators.**
+**A local-first prototype for reviewing and redacting people in creator video.**
 
-PublishSafe detects and tracks people, keeps the selected creator visible, and
-blurs everyone else along their body masks. Video stays on the machine running
-PublishSafe.
+PublishSafe combines a React workflow with FastAPI, YOLOv8n-seg, ByteTrack,
+OpenCV, and FFmpeg. It proposes person tracks, lets an operator choose one
+creator to leave visible, and attempts to obscure every other detected person
+before MP4 export. Media processing stays on the host running the application;
+the application does not send video to a hosted inference API.
 
-![PublishSafe original and processed video comparison](docs/demo.gif)
+Blur is weak de-identification, not anonymity. Detection, segmentation,
+tracking, and rendering can fail, while voice, text, reflections, clothing,
+gait, and context can still identify someone. Treat every result as a review
+candidate, not as safe-to-publish output. Read the
+[threat model and human-review guide](docs/threat-model.md).
 
-Left: original public sample. Right: one person preserved while other people
-are protected.
+![Current PublishSafe upload and review UI](docs/ui-overview.png)
+
+This screenshot is generated from the current UI without uploaded media. It
+documents product framing and review warnings, not model accuracy or privacy.
+
+## 30-second review
+
+| Question | Answer |
+| --- | --- |
+| What is it? | A one-visible-creator video-redaction workflow for trusted localhost use |
+| Core pipeline | Upload → YOLO person candidates → ByteTrack IDs → creator selection → mask blur/avatar overlay → OpenCV/FFmpeg export |
+| Backend scope | Capability-scoped media APIs, private storage/retention, in-process job progress, video I/O, model/tracker integration, and fail-closed decision logic |
+| Evidence | Model-free Python tests, React production build, Compose validation, deterministic evaluation-metric tests, and a documented manual sample recipe |
+| Current maturity | Portfolio MVP; not a hosted service, certified anonymizer, identity system, or unattended publishing tool |
+| Missing evidence | No checked-in real-video benchmark, real-YOLO CI, privacy certification, public deployment, or proof that identity is removed |
+
+![PublishSafe architecture](docs/architecture.svg)
+
+The diagram describes application data flow. It is not a claim of stable
+identity tracking or a formal security boundary.
+
+## What is implemented
+
+1. Upload an MP4, MOV, AVI, MKV, or WebM video.
+2. Generate a preview from YOLO person detections and ByteTrack IDs.
+3. Select the creator who may remain visible.
+4. Preview adjustable blur strength, or configure an experimental avatar for the render.
+5. Render a short proxy preview or every decoded source frame.
+6. Review and download the processed MP4.
+
+The default policy is to **attempt to redact each detected person except the
+selected creator**:
+
+- missing, invalid, empty, or obviously degraded masks fall back to a padded
+  bounding-box blur;
+- preview candidates and boxes come from a private server-owned manifest; the
+  frame-preview API rejects client-supplied candidate geometry;
+- the full render compares candidates with the appearance reference derived
+  from the upload-time selected preview, rather than trusting a recycled
+  tracker integer;
+- the selected track is exempted only when conservative appearance and
+  detection checks are strong and unambiguous;
+- ambiguous creator tracking blurs every detected person on that frame instead
+  of guessing;
+- source audio is removed by default; preserving it requires an explicit
+  choice and fails visibly if FFmpeg cannot honor that choice.
+
+These are uncalibrated safety heuristics, not accuracy guarantees. A detector
+miss, plausible-but-incomplete mask, identity error, or export defect can still
+leave sensitive content visible.
+
+### Preview and full-render behavior
+
+| Mode | Purpose | Implementation |
+| --- | --- | --- |
+| Single-frame preview | Inspect selection and blur strength | One derived JPEG |
+| Short preview | Inspect motion before a full run | Opening segment at capped proxy dimensions/frame rate |
+| Full process | Produce a review candidate | Source dimensions and frame rate; each decoded frame is processed |
+
+A short preview is not acceptance testing. Review the complete exported file.
+
+## Private-media boundary
+
+- Raw uploads have **no HTTP route**.
+- Video-specific preview, process, job-status, and delete operations require a
+  bearer session capability scoped to one upload.
+- Derived previews and outputs use five-minute HMAC-signed capability URLs
+  bound to an artifact and, for output, a job.
+- Media responses use private/no-store, no-referrer, and nosniff headers.
+- Private directories use owner-only permissions (0700); files use 0600.
+- Sessions expire after 24 hours by default. “Change video” calls the delete
+  endpoint immediately, active frame/FFmpeg work receives cancellation, and a
+  startup/periodic janitor removes expired media.
+- The UI can refresh expired preview/output capabilities through a
+  session-authorized route. Download responses use a fixed non-secret filename.
+- Docker Compose publishes the web entry point only on
+  `127.0.0.1:5173`.
+
+These controls reduce accidental local exposure. They are possession-based
+capabilities, not user accounts, multi-tenant authorization, TLS, sandboxing,
+or secure erase. The default signing secret is process-local, so a restart
+revokes existing links; the in-memory job registry also loses status on
+restart. Active streams, open file handles, browser caches, backups, snapshots,
+and downstream copies may outlive ordinary deletion.
+
+Do not expose this MVP directly to the public internet.
+
+## Evidence and evaluation
+
+### Checked automatically
+
+CI runs three jobs:
+
+| Job | Scope |
+| --- | --- |
+| Python tests | API validation and dispatch, capability scope/expiry, raw-route denial, server-owned selection manifests and upload-time anchors, active-job cancellation, deletion/TTL cleanup, preview refresh, safe download names, traversal/symlink rejection, permissions, mask fallback, creator-exemption decisions, audio policy, processing failure cleanup, and metric math |
+| Frontend build | Clean install, high-severity dependency audit, and React production build |
+| Compose config | Docker Compose configuration parsing |
+
+The Python suite is deliberately model-free. It installs
+`backend/requirements-test.txt`, does not load Ultralytics or PyTorch, does
+not download model weights, and blocks outbound network access.
+
+### Not checked automatically
+
+CI does not run real YOLO inference, ByteTrack on real crossings, video
+decode/encode, FFmpeg, rendered-pixel inspection, or performance measurement.
+It does not establish detector recall, mask coverage, identity removal, or
+audio/text/reflection safety.
+
+No real annotated privacy dataset or real-video benchmark is checked in. The
+synthetic geometry under `evaluation/fixtures/` validates metric calculations
+only; its scores must never be reported as model or product performance.
+
+### Reproducible privacy-evaluation harness
+
+The offline [evaluation harness](evaluation/README.md) consumes dense
+frame-by-frame ground truth and redaction-candidate predictions. It reports:
+
+- person recall for instances explicitly marked `should_redact: true`;
+- the longest consecutive missed-redaction run for the same ground-truth
+  person/track;
+- breakdowns based only on explicit `occlusion`, `low_light`, `crowd`,
+  and `profile` labels, plus dataset-specific labels.
+
+Matching uses a deterministic maximum-cardinality one-to-one assignment over
+box pairs that satisfy the selected IoU threshold.
+
+```bash
+python -m evaluation.evaluate \
+  --ground-truth path/to/ground_truth.json \
+  --predictions path/to/predictions.json \
+  --iou-threshold 0.5 \
+  --output path/to/report.json
+```
+
+The optional real-YOLO runner measures detector-box coverage only. It does not
+exercise creator exclusion, tracking recovery, masks, rendering, audio, or
+export. The harness documents dataset consent, licensing, annotation, and
+reporting requirements before any real result is claimed.
 
 ## Quick start with Docker
 
-Requirements: [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-
-![PublishSafe Docker quick start](docs/install.gif)
+Requirement: [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
 ```bash
 git clone https://github.com/96528025/publishsafe.git
@@ -27,95 +169,12 @@ cd publishsafe
 ./scripts/start.sh
 ```
 
-Open `http://localhost:5173`.
-
-The first start builds the containers and downloads the YOLO segmentation
-weights, so it takes longer than later starts.
+Open `http://localhost:5173`. The first start builds containers and may
+download YOLO weights, so it takes longer than later starts.
 
 ```bash
-# Follow startup and processing logs
 docker compose logs -f
-
-# Stop PublishSafe
 ./scripts/stop.sh
-```
-
-## Maintainer owner mode
-
-The repository also contains a native accelerated profile for the maintainer's
-preconfigured Apple M2 Mac:
-
-```bash
-./scripts/start_owner.sh
-```
-
-This profile uses Apple GPU inference through PyTorch MPS and H.264 hardware
-encoding through VideoToolbox. It requires a local machine fingerprint file
-that is excluded from Git, so cloning the repository does not enable owner
-mode on another computer.
-
-Everyone else should continue to use `./scripts/start.sh`. Both modes share the
-same frontend, detection, tracking, blur, and export code. Only the execution
-device and final encoder differ.
-
-Stop the native owner services with `Ctrl+C` in their terminal or:
-
-```bash
-./scripts/stop_owner.sh
-```
-
-## What it does
-
-1. Upload an MP4, MOV, AVI, MKV, or WebM video.
-2. YOLOv8n-seg detects person masks and ByteTrack assigns tracking IDs.
-3. Select yourself from an annotated preview.
-4. Adjust the default anonymizing blur on a 10-100 strength slider, or choose
-   the experimental avatar mode.
-   The selected creator and blur strength are shown immediately on one frame.
-5. Preview the first 10 seconds at proxy quality: up to 1280px wide and
-   approximately 15 FPS, depending on the source frame rate.
-6. Process and download the protected MP4 at the source resolution and frame
-   rate.
-
-The default privacy rule is **protect everyone except the selected creator**.
-Uploads and outputs stay in local `uploads/` and `outputs/` directories.
-
-### Preview vs. full export quality
-
-PublishSafe uses lower-cost previews so users can test the selected person and
-blur strength without waiting for a complete render:
-
-| Mode | Purpose | Quality |
-| --- | --- | --- |
-| Single-frame preview | Check the selected creator and blur strength | One JPEG frame |
-| 10-second preview | Quickly review tracking and blur in motion | Up to 1280px wide, approximately 15 FPS |
-| Full Process | Create the final shareable video | Source resolution, source FPS, every frame processed |
-
-The reduced preview quality does **not** affect the Full Process export. For
-example, a 4K 30 FPS source remains 4K 30 FPS in the final render; only the
-10-second preview uses the faster proxy settings.
-
-## Architecture
-
-![PublishSafe architecture](docs/architecture.svg)
-
-## Project structure
-
-```text
-publishsafe/
-├── assets/avatars/       # Generated transparent mascot PNGs
-├── backend/
-│   ├── app/
-│   │   ├── main.py       # FastAPI routes and upload analysis
-│   │   ├── processor.py  # Background video processing jobs
-│   │   ├── tracker.py    # Small fallback tracking utilities
-│   │   └── vision.py     # YOLO segmentation and privacy rendering
-│   ├── tests/            # Model-free pytest suite
-│   ├── requirements.txt
-│   └── requirements-test.txt
-├── frontend/             # Vite + React UI
-├── outputs/
-└── uploads/
 ```
 
 ## Run from source
@@ -124,9 +183,7 @@ Requirements:
 
 - Python 3.10+
 - Node.js 18+
-- Optional: `ffmpeg` to preserve source audio in the exported MP4
-
-From the project root:
+- Optional: FFmpeg for H.264 output and explicit source-audio preservation
 
 ```bash
 python3 -m venv .venv
@@ -135,8 +192,8 @@ pip install -r backend/requirements.txt
 cd frontend && npm install && cd ..
 ```
 
-The first backend start downloads the open-source YOLOv8 nano segmentation
-weights (`yolov8n-seg.pt`). No model is trained by this project.
+The first backend start may download pretrained `yolov8n-seg.pt` weights.
+PublishSafe integrates that model; it does not train one.
 
 Terminal 1:
 
@@ -152,15 +209,10 @@ cd frontend
 npm run dev
 ```
 
-Open `http://localhost:5173`. API documentation is available at
+Open `http://localhost:5173`; local API documentation is at
 `http://localhost:8000/docs`.
 
-## Testing
-
-The test suite is deliberately model-free: it needs no YOLO weights, no GPU, no
-sample video, and no network access, so it typically completes in seconds.
-The current verified baseline is **50/50 backend tests passing**, plus a
-successful production React build.
+## Test
 
 ```bash
 python3 -m venv .venv
@@ -169,260 +221,103 @@ pip install -r backend/requirements-test.txt
 pytest
 ```
 
-`backend/requirements-test.txt` is separate from `backend/requirements.txt` and
-excludes `ultralytics`, so installing it does not pull in PyTorch.
-
-Build the frontend the same way CI does:
-
 ```bash
 cd frontend
 npm ci
 npm run build
 ```
 
-### What CI covers
+Validate Compose:
 
-CI runs on pushes to `main` and on every pull request as three parallel jobs:
+```bash
+docker compose config --quiet
+```
 
-| Job | Steps |
-| --- | --- |
-| Backend tests | Python 3.11, install `backend/requirements-test.txt`, run `pytest` |
-| Frontend build | Node 20, `npm ci`, `npm run build` |
-| Compose config | `docker compose config --quiet` |
-
-The backend tests cover request validation (video ID format, blur strength
-bounds, mode and scope vocabularies), the IoU tracker's ID assignment and
-expiry logic, the frame-level blur and appearance helpers on small NumPy
-arrays, and the API's own routing, status codes, and background-job dispatch
-with the detector replaced by a stub.
-
-### What CI does not cover
-
-**CI never runs real YOLO inference.** It does not download model weights, load
-a segmentation model, decode or encode video, or invoke FFmpeg. The API tests
-mock the detector and the background processor at the module boundary — they
-verify PublishSafe's own dispatch and error handling, not detection, tracking,
-or export quality. They are not end-to-end ML tests.
-
-Real end-to-end verification still happens manually through the demo and sample
-workflow: `./scripts/download_sample.sh`, then upload the clip through the UI
-and process it. Detection accuracy, ByteTrack ID stability across crossings,
-mask-aligned blur quality, and audio-preserving export are only exercised that
-way.
-
-## Sample video
-
-Generate a small public sample video based on the Ultralytics bus image:
+For a local manual recipe, the helper can generate motion from an external
+Ultralytics sample image, then you can upload it through the UI:
 
 ```bash
 ./scripts/download_sample.sh
 ```
 
-Upload `samples/publishsafe-sample.mp4` through the UI.
+The helper requires `curl` and FFmpeg. It downloads a mutable third-party asset
+whose license and immutable hash are not asserted by this repository, so it is
+excluded from release evidence and must not be redistributed without an
+independent provenance/license check. Manual observation is not a benchmark.
 
-The download is optional and requires `curl` and `ffmpeg`.
+## API surface
 
-## Fast testing with your own video
+- `POST /api/upload`: create a retained private session, analyze the clip,
+  and return a video-scoped bearer capability
+- `POST /api/frame-preview`: create a derived frame preview (session
+  capability required)
+- `GET /api/videos/{video_id}/preview-capability`: refresh one derived preview
+  URL (session capability required)
+- `POST /api/process`: start a render job (session capability required)
+- `GET /api/jobs/{job_id}`: poll status and refresh a derived-output URL
+  (session capability required)
+- `GET /api/media/{capability}`: retrieve one short-lived preview or output;
+  output requests may opt into a fixed-name attachment response
+- `DELETE /api/videos/{video_id}`: delete the scoped source and derived media
+- `GET /api/health`: report model/tracker/runtime configuration
 
-Use a short, low-resolution clip while tuning blur or tracking:
+Raw `/uploads` and `/outputs` paths are not mounted.
 
-```bash
-./scripts/make_test_clip.sh /path/to/video.mp4
-```
-
-To test a specific section, pass the start time and duration in seconds:
-
-```bash
-./scripts/make_test_clip.sh /path/to/video.mp4 10 5
-```
-
-The script creates a 960x540, 15 FPS clip in `test-clips/`. Upload that clip
-through the normal UI. Five seconds is about 75 frames and processes much
-faster than a full 4K video.
-
-## Troubleshooting
-
-### Docker starts, but the page is unavailable
-
-```bash
-docker compose ps
-docker compose logs -f
-```
-
-Wait until the backend health check passes. The first model download may take
-several minutes.
-
-### Port 5173 is already in use
-
-Stop another local Vite/PublishSafe process, or change the frontend mapping in
-`docker-compose.yml`:
-
-```yaml
-ports:
-  - "8080:80"
-```
-
-Then open `http://localhost:8080`.
-
-### Processing remains at 99%
-
-Frame processing has finished. When FFmpeg is available, it is encoding H.264
-and restoring source audio; large 4K videos can spend noticeable time in this
-final stage. Without FFmpeg, or if the merge fails, PublishSafe keeps the
-OpenCV-rendered silent MP4.
-
-### Docker runs out of memory
-
-Increase Docker Desktop's memory allocation. PyTorch and Ultralytics are large
-dependencies. Testing with a 720p or 1080p clip also reduces memory pressure.
-
-### Person IDs switch during a crossing
-
-PublishSafe uses ByteTrack plus clothing appearance recovery, but long
-occlusions and similar outfits can still cause errors. Try a clearer preview
-frame or open an issue with a reproducible, non-sensitive sample.
-
-### Apple Silicon GPU is not used in Docker
-
-The Docker setup currently uses CPU inference for portability. Running from
-source through the maintainer owner profile uses MPS on its preconfigured M2
-Mac. Other users should treat the Docker CPU workflow as the supported default.
-
-## Performance and quality
-
-The current full-video pipeline is the **quality-first baseline**:
-
-- It processes every source frame with YOLO and ByteTrack.
-- It preserves the source resolution and frame rate in the rendered video.
-- It uses the full tracking history instead of intentionally skipping frames.
-- When FFmpeg is available, it encodes a browser-compatible H.264 MP4 and
-  restores the source audio; otherwise it keeps the OpenCV-rendered silent MP4.
-
-This makes the current version slow on 4K or high-FPS footage, but it avoids
-deliberately reducing temporal coverage or output resolution. It is the
-highest-quality mode currently implemented in PublishSafe, not a guarantee of
-perfect results. Detection can still fail for small people, motion blur, long
-occlusions, or people with similar clothing.
-
-Approximate work scales with:
+## Project structure
 
 ```text
-video duration x source FPS x per-frame detection/rendering cost
+publishsafe/
+├── backend/
+│   ├── app/
+│   │   ├── capabilities.py  # HMAC session/media capabilities
+│   │   ├── main.py          # FastAPI routes and upload analysis
+│   │   ├── privacy.py       # Conservative creator-exemption decisions
+│   │   ├── processor.py     # In-process video jobs and export
+│   │   ├── storage.py       # Private paths, deletion, and TTL cleanup
+│   │   └── vision.py        # Model integration and rendering helpers
+│   ├── tests/
+│   └── requirements*.txt
+├── evaluation/              # Offline schemas, metrics, tests, optional runner
+├── frontend/                # Vite + React UI
+├── docs/                    # Architecture and threat model
+├── assets/avatars/
+├── uploads/                 # Git-ignored private working sessions
+└── outputs/                 # Git-ignored private per-job renders
 ```
 
-For example, 10 seconds at 30 FPS contains about 300 frames, while one minute
-at 60 FPS contains about 3,600 frames.
+## Security and responsible reporting
 
-### Future optimization options
+Read [SECURITY.md](SECURITY.md) before reporting a vulnerability. Never attach
+private, identifying, confidential, or unlicensed media, access capabilities,
+paths, or unredacted logs to an issue or pull request. Use synthetic geometry
+or properly licensed public sample material.
 
-1. **Generate a proxy video after upload**
+## Maintainer owner mode
 
-   Convert 4K footage to a 720p or 1080p working copy for detection, tracking,
-   and previews. This should provide one of the largest speed improvements.
-   Bounding boxes can later be scaled back to the original video. Tradeoff:
-   very small or distant people may be harder to detect.
+The repository contains a native accelerated profile for the maintainer's
+preconfigured Apple M2 Mac:
 
-2. **Use Apple GPU acceleration**
-
-   Run PyTorch/YOLO on the Apple Silicon `MPS` device when available instead of
-   CPU-only inference. This may substantially improve model speed. It requires
-   compatibility and memory testing on the target Mac.
-
-3. **Detect every second or third frame**
-
-   Run YOLO less frequently and use ByteTrack, interpolation, or optical flow
-   for frames between detections. This can remove 50-67% of detector calls.
-   Tradeoff: fast movement, brief appearances, and crossings may be less
-   accurate.
-
-4. **Reduce YOLO input size**
-
-   Lower `imgsz` from 640 to 512 or 416 for preview/fast modes. Tradeoff:
-   reduced accuracy for small or distant people.
-
-5. **Add output quality presets**
-
-   Offer modes such as:
-
-   ```text
-   Fast:      720p / 15 FPS
-   Balanced:  1080p / 30 FPS
-   Original:  source resolution / source FPS
-   ```
-
-   This lets users choose processing speed versus output fidelity.
-
-6. **Use Apple VideoToolbox encoding**
-
-   Replace CPU `libx264` encoding with `h264_videotoolbox` when available.
-   This primarily reduces the final 99% encoding/audio-merging wait. Tradeoff:
-   hardware encoding can produce different quality or file sizes at equivalent
-   settings.
-
-7. **Cache detection and tracking results**
-
-   Persist per-frame boxes and track IDs. A full render can then reuse the
-   first 10 seconds already analyzed for the effect preview, and users can
-   change avatar/blur styles without rerunning YOLO. This improves repeated
-   renders without sacrificing detection quality, at the cost of additional
-   cache storage and implementation complexity.
-
-8. **Evaluate newer lightweight detectors**
-
-   Benchmark YOLO11n or another small person detector against YOLOv8n using the
-   same videos. A newer model is not automatically faster or more accurate, so
-   it should only replace the baseline after measured comparison.
-
-### Recommended optimization order
-
-The most practical next performance iteration is:
-
-```text
-1080p proxy detection
--> MPS acceleration
--> cached tracking results
--> VideoToolbox encoding
--> optional frame skipping in Fast mode
+```bash
+./scripts/start_owner.sh
 ```
 
-Keep the current every-frame, original-resolution workflow as an `Original`
-quality option so speed improvements do not remove the quality-first baseline.
+It uses PyTorch MPS and VideoToolbox and requires a Git-ignored local machine
+fingerprint. Cloning the repository does not enable it on another computer.
+Everyone else should use `./scripts/start.sh`.
 
-## Contributing
+```bash
+./scripts/stop_owner.sh
+```
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Do not attach
-private or identifying videos to issues or pull requests.
+## Roadmap (not implemented)
 
-## License
+Potential work includes a durable job control plane and independent worker,
+real annotated evaluation data, rendered-mask/pixel coverage, manual
+redaction, identity-aware multi-user access, stronger deletion verification,
+and audio/text/plate/reflection tools. These are ideas, not shipped features.
 
-PublishSafe is licensed under the
-[GNU Affero General Public License v3.0](LICENSE), consistent with its
-Ultralytics dependency.
+## Contributing and license
 
-## API
-
-- `POST /api/upload`: validate, store, analyze, and create a preview
-- `POST /api/frame-preview`: render a fast single-frame blur preview
-- `POST /api/process`: start a protected-video job
-- `GET /api/jobs/{job_id}`: poll status and frame progress
-- `GET /api/health`: detector/tracker health summary
-
-## MVP notes
-
-- Blur mode uses instance-segmentation masks, with mask dilation and feathered
-  edges so the background remains clear. It falls back to a bounding box if a
-  mask is unavailable on a frame.
-- Tracking uses ByteTrack with a longer occlusion buffer. A clothing-appearance
-  fallback attempts to recover the selected creator when IDs switch during crossings.
-- Processing is serialized around the YOLO model for demo reliability.
-- OpenCV writes video frames. When `ffmpeg` is installed, source audio is
-  automatically merged into the final file.
-- Tracking can still struggle after a long full-body occlusion. A polished
-  version should use learned ReID embeddings and persist analyzed tracks before
-  rendering.
-
-## Privacy
-
-PublishSafe performs person detection, not face identification. It does not
-attempt to infer names or identities. This MVP stores media locally and does
-not upload it to an external service.
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). PublishSafe
+is licensed under the [GNU Affero General Public License v3.0](LICENSE),
+consistent with its current Ultralytics dependency.

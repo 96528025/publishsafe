@@ -4,8 +4,8 @@ Two things must happen before ``app.config`` is imported anywhere, so they run
 at module import time rather than inside a fixture:
 
 1. The upload/output/avatar directories are redirected into a throwaway
-   temporary tree. ``app.main`` mounts these paths as static directories at
-   import time, so redirecting them later would be too late.
+   temporary tree before ``app.config`` resolves them. Only avatar assets are
+   mounted publicly; uploads and outputs remain private.
 2. Nothing in the suite may reach the network or load a YOLO model.
 """
 
@@ -13,8 +13,11 @@ import os
 import shutil
 import socket
 import tempfile
+import time
 from pathlib import Path
 
+import cv2
+import numpy as np
 import pytest
 
 # Resolved because config.py resolves its overrides, and on macOS the temp dir
@@ -151,12 +154,68 @@ def upload_dir():
     return UPLOAD_DIR
 
 
+@pytest.fixture
+def output_dir():
+    from app.config import OUTPUT_DIR
+
+    return OUTPUT_DIR
+
+
+@pytest.fixture
+def video_session():
+    """Create private upload storage and its matching session capability."""
+
+    from app.capabilities import issue_session_capability
+    from app.config import MEDIA_TTL_SECONDS
+    from app.storage import create_upload_session
+
+    def create(
+        video_id: str,
+        *,
+        with_source: bool = True,
+        with_preview: bool = True,
+        people: list[dict] | None = None,
+    ):
+        expires_at = int(time.time()) + MEDIA_TTL_SECONDS
+        directory = create_upload_session(video_id, expires_at)
+        if with_source:
+            source = directory / "source.mp4"
+            source.write_bytes(b"fake video bytes")
+            source.chmod(0o600)
+        if with_preview:
+            from app.storage import write_preview_manifest
+
+            raw_preview = directory / "raw_preview.jpg"
+            cv2.imwrite(str(raw_preview), np.zeros((120, 160, 3), dtype=np.uint8))
+            raw_preview.chmod(0o600)
+            write_preview_manifest(
+                video_id,
+                people
+                if people is not None
+                else [
+                    {"track_id": 1, "bbox": [10, 10, 50, 100], "confidence": 0.95},
+                    {"track_id": 3, "bbox": [90, 10, 130, 100], "confidence": 0.95},
+                ],
+            )
+        token = issue_session_capability(video_id, MEDIA_TTL_SECONDS)
+        return directory, token
+
+    return create
+
+
 @pytest.fixture(autouse=True)
 def clean_media_dirs():
     """Keep every test's view of the media directories independent."""
     from app.config import OUTPUT_DIR, UPLOAD_DIR
+    from app.processor import job_runtimes, jobs, jobs_lock
 
+    with jobs_lock:
+        jobs.clear()
+        job_runtimes.clear()
     yield
+    with jobs_lock:
+        jobs.clear()
+        job_runtimes.clear()
     for directory in (UPLOAD_DIR, OUTPUT_DIR):
         for entry in directory.iterdir():
             if entry.is_file():
