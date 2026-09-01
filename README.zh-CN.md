@@ -77,7 +77,9 @@ Clone 项目后无法误用这个模式。
 
 默认隐私规则是：**保留选中的创作者，保护其他所有人物。**
 
-上传文件和处理结果分别保存在本地的 `uploads/` 和 `outputs/` 文件夹。
+上传文件和处理结果保存在仅限当前服务访问的本地目录。原片没有 HTTP 访问路由；
+预览和成片只通过 5 分钟有效的签名链接提供。“更换视频”会立即删除本次会话的
+全部媒体，后台清理任务默认会在 24 小时后自动删除过期文件。
 
 ## 预览与完整视频画质
 
@@ -165,7 +167,7 @@ npm run dev
 ## 测试
 
 后端测试刻意采用 model-free 设计：不下载 YOLO 权重，不加载 PyTorch，不需要 GPU、
-样例视频或网络。当前核验基线为 **50/50 项后端测试通过**，并且 React production build
+样例视频或网络。当前核验基线为 **66/66 项后端测试通过**，并且 React production build
 成功。
 
 ```bash
@@ -196,7 +198,7 @@ docker compose logs -f
 
 ```yaml
 ports:
-  - "8080:80"
+  - "127.0.0.1:8080:80"
 ```
 
 然后打开 `http://localhost:8080`。
@@ -225,8 +227,10 @@ publishsafe/
 ├── assets/avatars/       # 透明背景头像素材
 ├── backend/
 │   └── app/
+│       ├── capabilities.py # 会话与媒体签名 capability
 │       ├── main.py       # FastAPI 接口和上传分析
 │       ├── processor.py  # 后台视频处理任务
+│       ├── storage.py    # 私有路径、立即删除和 TTL 清理
 │       ├── tracker.py    # 追踪辅助工具
 │       └── vision.py     # YOLO 分割和隐私渲染
 ├── frontend/             # Vite + React 页面
@@ -239,7 +243,8 @@ publishsafe/
 ## 隐私
 
 PublishSafe 进行人物检测，不进行人脸身份识别，也不会尝试推断人物姓名。
-当前 MVP 将媒体文件保存在本地，不会将视频发送到外部服务。
+当前 MVP 将媒体文件保存在本地，不会将视频发送到外部服务。Docker 默认只监听
+`127.0.0.1`；每个视频的 API 操作都需要独立会话 capability，原始视频永不提供下载路由。
 
 不要在 GitHub Issue 或 Pull Request 中上传私人或可识别身份的视频。
 

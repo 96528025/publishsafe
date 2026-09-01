@@ -2,6 +2,7 @@ import logging
 import shutil
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Literal
@@ -9,8 +10,14 @@ from typing import Any, Literal
 import cv2
 import numpy as np
 
-from .config import OUTPUT_DIR, UPLOAD_DIR, VIDEO_ENCODER
+from .config import VIDEO_ENCODER
 from .privacy import CreatorCandidate, select_creator_exemption
+from .storage import (
+    delete_output_job,
+    find_video,
+    prepare_job_output,
+    secure_file,
+)
 from .vision import (
     PersonDetector,
     appearance_distance,
@@ -88,17 +95,6 @@ def ffmpeg_command(
     return command
 
 
-def output_paths(
-    video_id: str,
-    job_id: str,
-    process_scope: str,
-    attempt_id: str,
-) -> tuple[Path, Path]:
-    scope = "preview" if process_scope == "preview" else "protected"
-    stem = f"{video_id}_{scope}_{job_id}_{attempt_id}"
-    return OUTPUT_DIR / f".{stem}_silent.mp4", OUTPUT_DIR / f"{stem}.mp4"
-
-
 def finalize_output(
     temporary: Path,
     source: Path,
@@ -150,7 +146,7 @@ def completion_message(process_scope: str, audio_status: AudioStatus) -> str:
     subject = (
         "Your 10-second preview"
         if process_scope == "preview"
-        else "Your protected video"
+        else "Your processed video"
     )
     audio_result = (
         "source audio" if audio_status == "preserved" else "audio removed"
@@ -158,16 +154,11 @@ def completion_message(process_scope: str, audio_status: AudioStatus) -> str:
     return f"{subject} is ready with {audio_result}"
 
 
-def find_video(video_id: str) -> Path:
-    matches = list(UPLOAD_DIR.glob(f"{video_id}.*"))
-    if not matches:
-        raise FileNotFoundError("Uploaded video was not found")
-    return matches[0]
-
-
 def set_job(job_id: str, **changes: Any) -> None:
     with jobs_lock:
-        jobs[job_id].update(changes)
+        job = jobs.get(job_id)
+        if job is not None:
+            job.update(changes)
 
 
 def process_video(
@@ -186,6 +177,7 @@ def process_video(
     temporary: Path | None = None
     output: Path | None = None
     conservative_fallback_frames = 0
+    completed = False
     try:
         set_job(
             job_id,
@@ -211,12 +203,9 @@ def process_video(
         frame_step = max(1, round(fps / 15)) if process_scope == "preview" else 1
         output_fps = fps / frame_step
         frame_count = (source_frame_limit + frame_step - 1) // frame_step
-        temporary, output = output_paths(
-            video_id,
-            job_id,
-            process_scope,
-            uuid.uuid4().hex,
-        )
+        job_directory = prepare_job_output(video_id, job_id)
+        temporary = job_directory / "silent.mp4"
+        output = job_directory / "output.mp4"
         output_width, output_height = width, height
         if process_scope == "preview" and width > 1280:
             scale = 1280 / width
@@ -230,6 +219,7 @@ def process_video(
         )
         if not writer.isOpened():
             raise RuntimeError("Could not create the output video")
+        secure_file(temporary)
 
         detector.reset_tracking()
         avatar = load_avatar(avatar_style) if mode == "avatar" else None
@@ -352,18 +342,20 @@ def process_video(
             VIDEO_ENCODER,
             audio_policy,
         )
+        secure_file(output)
 
         set_job(
             job_id,
             status="complete",
             progress=100,
             message=completion_message(process_scope, audio_status),
-            output_url=f"/outputs/{output.name}",
+            output_ready=True,
             process_scope=process_scope,
             audio_policy=audio_policy,
             audio_status=audio_status,
             conservative_fallback_frames=conservative_fallback_frames,
         )
+        completed = True
     except AudioPreservationError as exc:
         logger.exception("Audio preservation failed for job %s", job_id)
         if writer is not None:
@@ -407,9 +399,12 @@ def process_video(
             writer.release()
         if capture is not None:
             capture.release()
+        if not completed:
+            delete_output_job(video_id, job_id)
 
 
 def create_job(
+    video_id: str,
     process_scope: str = "full",
     audio_policy: AudioPolicy = "remove",
 ) -> str:
@@ -421,9 +416,12 @@ def create_job(
             "progress": 0,
             "message": "Waiting to process",
             "output_url": None,
+            "output_ready": False,
             "process_scope": process_scope,
             "audio_policy": audio_policy,
             "audio_status": "pending",
             "conservative_fallback_frames": 0,
+            "video_id": video_id,
+            "created_at": time.time(),
         }
     return job_id

@@ -20,8 +20,20 @@ const avatarOptions = [
   { id: "bloom", name: "Bloom", note: "Fresh & friendly" },
 ];
 
+async function fetchJobStatus(jobId, sessionCapability) {
+  const response = await fetch(`${API}/api/jobs/${jobId}`, {
+    headers: { Authorization: `Bearer ${sessionCapability}` },
+  });
+  const nextJob = await response.json();
+  if (!response.ok) throw new Error(nextJob.detail || "Could not refresh processing status");
+  return nextJob;
+}
+
 function App() {
   const inputRef = useRef(null);
+  const videoRef = useRef(null);
+  const mediaRetryRef = useRef(0);
+  const resumePlaybackRef = useRef(null);
   const [upload, setUpload] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [avatar, setAvatar] = useState("sunny");
@@ -46,8 +58,7 @@ function App() {
     if (!job?.job_id || ["complete", "failed"].includes(job.status)) return;
     const timer = setInterval(async () => {
       try {
-        const response = await fetch(`${API}/api/jobs/${job.job_id}`);
-        const nextJob = await response.json();
+        const nextJob = await fetchJobStatus(job.job_id, upload.session_capability);
         setJob(nextJob);
         if (nextJob.status === "failed") setError(nextJob.message);
       } catch {
@@ -55,7 +66,7 @@ function App() {
       }
     }, 1000);
     return () => clearInterval(timer);
-  }, [job?.job_id, job?.status]);
+  }, [job?.job_id, job?.status, upload?.session_capability]);
 
   useEffect(() => {
     if (!upload || !selectedId || mode !== "blur") {
@@ -69,7 +80,10 @@ function App() {
       try {
         const response = await fetch(`${API}/api/frame-preview`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${upload.session_capability}`,
+          },
           signal: controller.signal,
           body: JSON.stringify({
             video_id: upload.video_id,
@@ -127,7 +141,10 @@ function App() {
     try {
       const response = await fetch(`${API}/api/process`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${upload.session_capability}`,
+        },
         body: JSON.stringify({
           video_id: upload.video_id,
           selected_track_id: selectedId,
@@ -147,12 +164,72 @@ function App() {
     }
   }
 
-  function reset() {
+  async function downloadOutput(event) {
+    event.preventDefault();
+    try {
+      const refreshedJob = await fetchJobStatus(job.job_id, upload.session_capability);
+      setJob(refreshedJob);
+      if (!refreshedJob.output_url) throw new Error("The processed video is no longer available.");
+      const link = document.createElement("a");
+      link.href = `${API}${refreshedJob.output_url}`;
+      link.download = "";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (downloadError) {
+      setError(downloadError.message);
+    }
+  }
+
+  async function refreshOutputAfterError() {
+    if (mediaRetryRef.current >= 1) {
+      setError("The video link could not be refreshed. Try Download to request a new link.");
+      return;
+    }
+    mediaRetryRef.current += 1;
+    const player = videoRef.current;
+    resumePlaybackRef.current = {
+      currentTime: player?.currentTime || 0,
+      shouldPlay: Boolean(player && !player.paused),
+    };
+    try {
+      const refreshedJob = await fetchJobStatus(job.job_id, upload.session_capability);
+      if (!refreshedJob.output_url) throw new Error("The processed video is no longer available.");
+      setJob(refreshedJob);
+    } catch (refreshError) {
+      setError(refreshError.message);
+    }
+  }
+
+  function resumeRefreshedOutput() {
+    const resume = resumePlaybackRef.current;
+    const player = videoRef.current;
+    if (!resume || !player) return;
+    player.currentTime = resume.currentTime;
+    if (resume.shouldPlay) player.play().catch(() => {});
+    resumePlaybackRef.current = null;
+    mediaRetryRef.current = 0;
+  }
+
+  async function reset(event) {
+    event?.preventDefault?.();
+    const previousUpload = upload;
     setUpload(null);
     setSelectedId(null);
     setJob(null);
     setError("");
+    setFramePreviewUrl("");
     if (inputRef.current) inputRef.current.value = "";
+    if (previousUpload?.session_capability) {
+      try {
+        await fetch(`${API}/api/videos/${previousUpload.video_id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${previousUpload.session_capability}` },
+        });
+      } catch {
+        // The server-side TTL remains the fallback if the local backend stops.
+      }
+    }
   }
 
   return (
@@ -391,9 +468,20 @@ function App() {
                 ? "Review the first 10 seconds. You can adjust the style or process the full video."
                 : "You stay visible. Everyone else follows your selected privacy style."}
             </p>
-            <video controls src={`${API}${job.output_url}`} />
+            <video
+              ref={videoRef}
+              controls
+              src={`${API}${job.output_url}`}
+              onError={refreshOutputAfterError}
+              onCanPlay={resumeRefreshedOutput}
+            />
             <div className="complete-actions">
-              <a className="primary" href={`${API}${job.output_url}`} download>
+              <a
+                className="primary"
+                href={`${API}${job.output_url}`}
+                download
+                onClick={downloadOutput}
+              >
                 <Download size={18} /> Download {job.process_scope === "preview" ? "preview" : "MP4"}
               </a>
               {job.process_scope === "preview" ? (

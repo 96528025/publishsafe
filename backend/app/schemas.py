@@ -11,6 +11,8 @@ class PersonPreview(BaseModel):
 
 class UploadResponse(BaseModel):
     video_id: str
+    session_capability: str
+    expires_at: int
     filename: str
     preview_url: str
     people: list[PersonPreview]

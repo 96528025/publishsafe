@@ -13,6 +13,7 @@ import os
 import shutil
 import socket
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -151,12 +152,45 @@ def upload_dir():
     return UPLOAD_DIR
 
 
+@pytest.fixture
+def output_dir():
+    from app.config import OUTPUT_DIR
+
+    return OUTPUT_DIR
+
+
+@pytest.fixture
+def video_session():
+    """Create private upload storage and its matching session capability."""
+
+    from app.capabilities import issue_session_capability
+    from app.config import MEDIA_TTL_SECONDS
+    from app.storage import create_upload_session
+
+    def create(video_id: str, *, with_source: bool = True):
+        expires_at = int(time.time()) + MEDIA_TTL_SECONDS
+        directory = create_upload_session(video_id, expires_at)
+        if with_source:
+            source = directory / "source.mp4"
+            source.write_bytes(b"fake video bytes")
+            source.chmod(0o600)
+        token = issue_session_capability(video_id, MEDIA_TTL_SECONDS)
+        return directory, token
+
+    return create
+
+
 @pytest.fixture(autouse=True)
 def clean_media_dirs():
     """Keep every test's view of the media directories independent."""
     from app.config import OUTPUT_DIR, UPLOAD_DIR
+    from app.processor import jobs, jobs_lock
 
+    with jobs_lock:
+        jobs.clear()
     yield
+    with jobs_lock:
+        jobs.clear()
     for directory in (UPLOAD_DIR, OUTPUT_DIR):
         for entry in directory.iterdir():
             if entry.is_file():

@@ -10,9 +10,9 @@ from app.processor import (
     create_job,
     ffmpeg_command,
     finalize_output,
-    output_paths,
     process_video,
 )
+from app.storage import prepare_job_output, resolve_output
 from app.tracker import Track
 
 
@@ -92,24 +92,17 @@ def test_preserve_policy_fails_instead_of_silently_removing_audio(
     assert not output.exists()
 
 
-def test_output_paths_isolate_jobs_and_attempts():
+def test_output_directories_isolate_jobs():
     job_a = "a" * 32
     job_b = "b" * 32
-    attempt_a = "1" * 32
-    attempt_b = "2" * 32
 
-    temp_a, output_a = output_paths(VALID_VIDEO_ID, job_a, "full", attempt_a)
-    temp_b, output_b = output_paths(VALID_VIDEO_ID, job_b, "full", attempt_a)
-    temp_retry, output_retry = output_paths(
-        VALID_VIDEO_ID, job_a, "full", attempt_b
-    )
+    directory_a = prepare_job_output(VALID_VIDEO_ID, job_a)
+    directory_b = prepare_job_output(VALID_VIDEO_ID, job_b)
 
-    assert len({temp_a, temp_b, temp_retry}) == 3
-    assert len({output_a, output_b, output_retry}) == 3
-    assert job_a in temp_a.name and job_a in output_a.name
-    assert attempt_a in temp_a.name and attempt_a in output_a.name
-    assert job_b in output_b.name
-    assert attempt_b in output_retry.name
+    assert directory_a != directory_b
+    assert directory_a.name == job_a
+    assert directory_b.name == job_b
+    assert directory_a.parent == directory_b.parent
 
 
 class FakeCapture:
@@ -175,10 +168,9 @@ class SequenceDetector:
 
 
 def test_ambiguous_reid_blurs_everyone_and_records_the_fallback(
-    upload_dir, monkeypatch
+    video_session, monkeypatch
 ):
-    source = upload_dir / f"{VALID_VIDEO_ID}.mp4"
-    source.write_bytes(b"fake source")
+    video_session(VALID_VIDEO_ID)
     frames = [
         np.zeros((120, 160, 3), dtype=np.uint8),
         np.ones((120, 160, 3), dtype=np.uint8),
@@ -227,7 +219,7 @@ def test_ambiguous_reid_blurs_everyone_and_records_the_fallback(
         lambda frame, bbox, avatar: overlaid.append(bbox),
     )
     processor.jobs.clear()
-    job_id = create_job(audio_policy="remove")
+    job_id = create_job(VALID_VIDEO_ID, audio_policy="remove")
 
     process_video(
         job_id,
@@ -248,13 +240,15 @@ def test_ambiguous_reid_blurs_everyone_and_records_the_fallback(
     assert job["conservative_fallback_frames"] == 1
     assert blurred == [(20, 10, 60, 100), (90, 10, 130, 100)]
     assert overlaid == []
-    assert job_id in job["output_url"]
+    assert job["output_ready"] is True
+    assert resolve_output(VALID_VIDEO_ID, job_id).read_bytes() == b"silent rendered video"
     assert len(writers) == 1 and len(writers[0].frames) == 2
 
 
-def test_preserve_failure_is_reported_in_job_state(upload_dir, monkeypatch):
-    source = upload_dir / f"{VALID_VIDEO_ID}.mp4"
-    source.write_bytes(b"fake source")
+def test_preserve_failure_is_reported_in_job_state(
+    video_session, output_dir, monkeypatch
+):
+    video_session(VALID_VIDEO_ID)
     frame = np.zeros((120, 160, 3), dtype=np.uint8)
     monkeypatch.setattr(
         processor.cv2,
@@ -279,7 +273,7 @@ def test_preserve_failure_is_reported_in_job_state(upload_dir, monkeypatch):
 
     monkeypatch.setattr(processor, "finalize_output", fail_preservation)
     processor.jobs.clear()
-    job_id = create_job(audio_policy="preserve")
+    job_id = create_job(VALID_VIDEO_ID, audio_policy="preserve")
 
     process_video(
         job_id,
@@ -299,3 +293,4 @@ def test_preserve_failure_is_reported_in_job_state(upload_dir, monkeypatch):
     assert job["audio_status"] == "preserve_failed"
     assert job["output_url"] is None
     assert job["message"] == "Audio preservation failed safely"
+    assert not (output_dir / VALID_VIDEO_ID).exists()

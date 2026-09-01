@@ -78,7 +78,10 @@ Stop the native owner services with `Ctrl+C` in their terminal or:
    rate.
 
 The default privacy rule is **protect everyone except the selected creator**.
-Uploads and outputs stay in local `uploads/` and `outputs/` directories.
+Uploads and outputs stay in owner-only local storage. Raw uploads have no HTTP
+route; previews and outputs use five-minute signed capability URLs. Choosing
+"Change video" deletes the session immediately, and an automatic janitor
+removes media after 24 hours by default.
 
 ### Preview vs. full export quality
 
@@ -106,8 +109,10 @@ publishsafe/
 ├── assets/avatars/       # Generated transparent mascot PNGs
 ├── backend/
 │   ├── app/
+│   │   ├── capabilities.py # Signed session and media capabilities
 │   │   ├── main.py       # FastAPI routes and upload analysis
 │   │   ├── processor.py  # Background video processing jobs
+│   │   ├── storage.py    # Private paths, deletion, and TTL cleanup
 │   │   ├── tracker.py    # Small fallback tracking utilities
 │   │   └── vision.py     # YOLO segmentation and privacy rendering
 │   ├── tests/            # Model-free pytest suite
@@ -159,7 +164,7 @@ Open `http://localhost:5173`. API documentation is available at
 
 The test suite is deliberately model-free: it needs no YOLO weights, no GPU, no
 sample video, and no network access, so it typically completes in seconds.
-The current verified baseline is **50/50 backend tests passing**, plus a
+The current verified baseline is **66/66 backend tests passing**, plus a
 successful production React build.
 
 ```bash
@@ -190,11 +195,10 @@ CI runs on pushes to `main` and on every pull request as three parallel jobs:
 | Frontend build | Node 20, `npm ci`, `npm run build` |
 | Compose config | `docker compose config --quiet` |
 
-The backend tests cover request validation (video ID format, blur strength
-bounds, mode and scope vocabularies), the IoU tracker's ID assignment and
-expiry logic, the frame-level blur and appearance helpers on small NumPy
-arrays, and the API's own routing, status codes, and background-job dispatch
-with the detector replaced by a stub.
+The backend tests cover request validation, tracking and frame helpers, API
+dispatch, session authorization, signed-link expiry, immediate deletion, TTL
+cleanup, path traversal and symlink rejection, owner-only permissions, and the
+guarantee that raw uploads have no serving route.
 
 ### What CI does not cover
 
@@ -259,7 +263,7 @@ Stop another local Vite/PublishSafe process, or change the frontend mapping in
 
 ```yaml
 ports:
-  - "8080:80"
+  - "127.0.0.1:8080:80"
 ```
 
 Then open `http://localhost:8080`.
@@ -402,9 +406,11 @@ Ultralytics dependency.
 ## API
 
 - `POST /api/upload`: validate, store, analyze, and create a preview
-- `POST /api/frame-preview`: render a fast single-frame blur preview
-- `POST /api/process`: start a protected-video job
-- `GET /api/jobs/{job_id}`: poll status and frame progress
+- `POST /api/frame-preview`: render a single-frame preview (session capability required)
+- `POST /api/process`: start a protected-video job (session capability required)
+- `GET /api/jobs/{job_id}`: poll status and receive a short-lived output URL (session capability required)
+- `GET /api/media/{capability}`: serve one signed preview or output with `private, no-store`
+- `DELETE /api/videos/{video_id}`: delete the original and every derived artifact now
 - `GET /api/health`: detector/tracker health summary
 
 ## MVP notes
@@ -425,4 +431,6 @@ Ultralytics dependency.
 
 PublishSafe performs person detection, not face identification. It does not
 attempt to infer names or identities. This MVP stores media locally and does
-not upload it to an external service.
+not upload it to an external service. Docker publishes the UI only on
+`127.0.0.1`; media API operations require a per-upload session capability,
+and raw source videos are never served.
