@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 jobs: dict[str, dict[str, Any]] = {}
 jobs_lock = threading.Lock()
+job_runtimes: dict[str, "JobRuntime"] = {}
 
 AudioPolicy = Literal["remove", "preserve"]
 AudioStatus = Literal["removed", "preserved"]
@@ -38,6 +39,115 @@ AudioStatus = Literal["removed", "preserved"]
 
 class AudioPreservationError(RuntimeError):
     pass
+
+
+class JobCancelled(RuntimeError):
+    pass
+
+
+class JobRuntime:
+    def __init__(self) -> None:
+        self.cancel_event = threading.Event()
+        self.active_process: subprocess.Popen | None = None
+
+
+def raise_if_cancelled(job_id: str) -> None:
+    with jobs_lock:
+        runtime = job_runtimes.get(job_id)
+    if runtime is None or runtime.cancel_event.is_set():
+        raise JobCancelled("Processing was cancelled")
+
+
+def cancel_video_jobs(video_id: str, *, drop_records: bool = True) -> set[str]:
+    """Signal every active job for a video and optionally revoke its records."""
+
+    active_processes: list[subprocess.Popen] = []
+    with jobs_lock:
+        job_ids = {
+            job_id
+            for job_id, job in jobs.items()
+            if job.get("video_id") == video_id
+        }
+        for job_id in job_ids:
+            runtime = job_runtimes.get(job_id)
+            if runtime is not None:
+                runtime.cancel_event.set()
+                if runtime.active_process is not None:
+                    active_processes.append(runtime.active_process)
+            if drop_records:
+                jobs.pop(job_id, None)
+                job_runtimes.pop(job_id, None)
+
+    # Do not wait in the DELETE request. The worker owns process reaping and
+    # escalates to kill if FFmpeg does not exit after terminate.
+    for process in active_processes:
+        if process.poll() is None:
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
+    return job_ids
+
+
+def finish_job(job_id: str) -> None:
+    with jobs_lock:
+        runtime = job_runtimes.pop(job_id, None)
+        if runtime is not None:
+            if runtime.cancel_event.is_set():
+                jobs.pop(job_id, None)
+
+
+def _stop_process(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=2)
+
+
+def _run_cancellable_command(
+    job_id: str, command: list[str]
+) -> subprocess.CompletedProcess:
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    with jobs_lock:
+        runtime = job_runtimes.get(job_id)
+        if runtime is not None:
+            runtime.active_process = process
+    if runtime is None or runtime.cancel_event.is_set():
+        _stop_process(process)
+        raise JobCancelled("Processing was cancelled")
+
+    try:
+        while True:
+            try:
+                stdout, stderr = process.communicate(timeout=0.2)
+                break
+            except subprocess.TimeoutExpired:
+                if not runtime.cancel_event.is_set():
+                    continue
+                _stop_process(process)
+                process.communicate()
+                raise JobCancelled("Processing was cancelled")
+    finally:
+        with jobs_lock:
+            current = job_runtimes.get(job_id)
+            if current is runtime and current.active_process is process:
+                current.active_process = None
+
+    if runtime.cancel_event.is_set():
+        raise JobCancelled("Processing was cancelled")
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def ffmpeg_command(
@@ -53,6 +163,9 @@ def ffmpeg_command(
     command = [
         "ffmpeg",
         "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
         "-i",
         str(temporary),
     ]
@@ -101,6 +214,8 @@ def finalize_output(
     output: Path,
     encoder: str,
     audio_policy: AudioPolicy,
+    *,
+    job_id: str | None = None,
 ) -> AudioStatus:
     if audio_policy not in {"remove", "preserve"}:
         raise ValueError(f"Unsupported audio policy: {audio_policy}")
@@ -112,10 +227,11 @@ def finalize_output(
         temporary.replace(output)
         return "removed"
 
-    result = subprocess.run(
-        ffmpeg_command(temporary, source, output, encoder, audio_policy),
-        capture_output=True,
-        text=True,
+    command = ffmpeg_command(temporary, source, output, encoder, audio_policy)
+    result = (
+        _run_cancellable_command(job_id, command)
+        if job_id is not None
+        else subprocess.run(command, capture_output=True, text=True)
     )
     if result.returncode != 0 and encoder != "libx264":
         logger.warning(
@@ -123,10 +239,13 @@ def finalize_output(
             encoder,
             result.stderr[-500:],
         )
-        result = subprocess.run(
-            ffmpeg_command(temporary, source, output, "libx264", audio_policy),
-            capture_output=True,
-            text=True,
+        fallback_command = ffmpeg_command(
+            temporary, source, output, "libx264", audio_policy
+        )
+        result = (
+            _run_cancellable_command(job_id, fallback_command)
+            if job_id is not None
+            else subprocess.run(fallback_command, capture_output=True, text=True)
         )
 
     if result.returncode != 0:
@@ -157,7 +276,12 @@ def completion_message(process_scope: str, audio_status: AudioStatus) -> str:
 def set_job(job_id: str, **changes: Any) -> None:
     with jobs_lock:
         job = jobs.get(job_id)
-        if job is not None:
+        runtime = job_runtimes.get(job_id)
+        if (
+            job is not None
+            and runtime is not None
+            and not runtime.cancel_event.is_set()
+        ):
             job.update(changes)
 
 
@@ -171,6 +295,8 @@ def process_video(
     process_scope: str,
     detector: PersonDetector,
     audio_policy: AudioPolicy = "remove",
+    *,
+    creator_appearance: np.ndarray | None = None,
 ) -> None:
     capture = None
     writer = None
@@ -179,6 +305,7 @@ def process_video(
     conservative_fallback_frames = 0
     completed = False
     try:
+        raise_if_cancelled(job_id)
         set_job(
             job_id,
             status="processing",
@@ -186,6 +313,7 @@ def process_video(
             audio_policy=audio_policy,
             audio_status="pending",
         )
+        raise_if_cancelled(job_id)
         source = find_video(video_id)
         capture = cv2.VideoCapture(str(source))
         if not capture.isOpened():
@@ -226,10 +354,19 @@ def process_video(
         frame_number = 0
         source_frame_number = 0
         creator_track_id = selected_track_id
-        creator_appearance: np.ndarray | None = None
+        creator_reference: np.ndarray | None = None
+        if creator_appearance is not None:
+            candidate_reference = np.asarray(
+                creator_appearance, dtype=np.float32
+            ).reshape(-1)
+            if candidate_reference.size and np.all(
+                np.isfinite(candidate_reference)
+            ):
+                creator_reference = candidate_reference.copy()
         last_fallback_detail: str | None = None
 
         while True:
+            raise_if_cancelled(job_id)
             if source_frame_number >= source_frame_limit:
                 break
             ok, frame = capture.read()
@@ -245,19 +382,14 @@ def process_video(
                     (output_width, output_height),
                     interpolation=cv2.INTER_AREA,
                 )
+            raise_if_cancelled(job_id)
             tracks = detector.track(frame)
+            raise_if_cancelled(job_id)
 
             track_appearances = {
                 track.track_id: appearance_histogram(frame, track.bbox)
                 for track in tracks
             }
-            if creator_appearance is None:
-                selected = next(
-                    (track for track in tracks if track.track_id == selected_track_id),
-                    None,
-                )
-                if selected is not None:
-                    creator_appearance = track_appearances[selected.track_id]
 
             candidates = [
                 CreatorCandidate(
@@ -265,10 +397,10 @@ def process_video(
                     detection_confidence=track.confidence,
                     appearance_distance=(
                         appearance_distance(
-                            creator_appearance,
+                            creator_reference,
                             track_appearances[track.track_id],
                         )
-                        if creator_appearance is not None
+                        if creator_reference is not None
                         else None
                     ),
                 )
@@ -309,7 +441,7 @@ def process_video(
 
             if frame_number == 1 or frame_number % 10 == 0:
                 progress = min(99, int(frame_number / frame_count * 100))
-                message = f"Protecting frame {frame_number} of {frame_count}"
+                message = f"Processing frame {frame_number} of {frame_count}"
                 set_job(
                     job_id,
                     progress=progress,
@@ -335,13 +467,16 @@ def process_video(
             ),
             conservative_fallback_frames=conservative_fallback_frames,
         )
+        raise_if_cancelled(job_id)
         audio_status = finalize_output(
             temporary,
             source,
             output,
             VIDEO_ENCODER,
             audio_policy,
+            job_id=job_id,
         )
+        raise_if_cancelled(job_id)
         secure_file(output)
 
         set_job(
@@ -356,6 +491,8 @@ def process_video(
             conservative_fallback_frames=conservative_fallback_frames,
         )
         completed = True
+    except JobCancelled:
+        logger.info("Processing cancelled for job %s", job_id)
     except AudioPreservationError as exc:
         logger.exception("Audio preservation failed for job %s", job_id)
         if writer is not None:
@@ -401,6 +538,7 @@ def process_video(
             capture.release()
         if not completed:
             delete_output_job(video_id, job_id)
+        finish_job(job_id)
 
 
 def create_job(
@@ -424,4 +562,5 @@ def create_job(
             "video_id": video_id,
             "created_at": time.time(),
         }
+        job_runtimes[job_id] = JobRuntime()
     return job_id

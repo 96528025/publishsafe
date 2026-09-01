@@ -1,40 +1,81 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="300" viewBox="0 0 1100 300">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">PublishSafe local capability and video-processing architecture</title>
+  <desc id="desc">A React browser uses capability-protected FastAPI routes. Raw media and a server-owned preview manifest stay in private session storage. An in-process worker uses the upload-time creator appearance anchor, YOLO, ByteTrack, and fail-closed decisions before OpenCV and FFmpeg create a derived review copy. Only short-lived signed preview and output URLs return to the browser.</desc>
   <defs>
     <style>
-      .title { font: 700 20px Arial, sans-serif; fill: #172032; }
-      .text { font: 15px Arial, sans-serif; fill: #596273; }
-      .box { fill: #ffffff; stroke: #12b89f; stroke-width: 2; rx: 16; }
+      .heading { font: 700 24px Arial, sans-serif; fill: #172032; }
+      .title { font: 700 17px Arial, sans-serif; fill: #172032; }
+      .text { font: 14px Arial, sans-serif; fill: #596273; }
+      .small { font: 12px Arial, sans-serif; fill: #596273; }
+      .box { fill: #ffffff; stroke: #12a991; stroke-width: 2; rx: 16; }
+      .private { fill: #f0faf7; stroke: #0b826f; stroke-width: 2; rx: 16; }
+      .decision { fill: #fff8e9; stroke: #d79b25; stroke-width: 2; rx: 16; }
       .arrow { stroke: #172032; stroke-width: 2; fill: none; marker-end: url(#head); }
+      .return { stroke: #0b826f; stroke-width: 2; stroke-dasharray: 7 6; fill: none; marker-end: url(#green-head); }
     </style>
     <marker id="head" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
       <polygon points="0 0, 10 3.5, 0 7" fill="#172032"/>
     </marker>
+    <marker id="green-head" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#0b826f"/>
+    </marker>
   </defs>
-  <rect width="1100" height="300" fill="#f7f5f0"/>
-  <rect class="box" x="30" y="72" width="170" height="110"/>
-  <text class="title" x="115" y="112" text-anchor="middle">React UI</text>
-  <text class="text" x="115" y="142" text-anchor="middle">Upload + select</text>
-  <text class="text" x="115" y="165" text-anchor="middle">Blur preview</text>
-  <path class="arrow" d="M200 127 H245"/>
-  <rect class="box" x="250" y="72" width="170" height="110"/>
-  <text class="title" x="335" y="112" text-anchor="middle">FastAPI</text>
-  <text class="text" x="335" y="142" text-anchor="middle">Scoped API + jobs</text>
-  <text class="text" x="335" y="165" text-anchor="middle">Private sessions + TTL</text>
-  <path class="arrow" d="M420 127 H465"/>
-  <rect class="box" x="470" y="72" width="170" height="110"/>
-  <text class="title" x="555" y="112" text-anchor="middle">YOLOv8n-seg</text>
-  <text class="text" x="555" y="142" text-anchor="middle">Person candidates</text>
-  <text class="text" x="555" y="165" text-anchor="middle">Masks when present</text>
-  <path class="arrow" d="M640 127 H685"/>
-  <rect class="box" x="690" y="72" width="170" height="110"/>
-  <text class="title" x="775" y="112" text-anchor="middle">ByteTrack</text>
-  <text class="text" x="775" y="142" text-anchor="middle">Temporal track IDs</text>
-  <text class="text" x="775" y="165" text-anchor="middle">Appearance heuristic</text>
-  <path class="arrow" d="M860 127 H905"/>
-  <rect class="box" x="910" y="72" width="160" height="110"/>
-  <text class="title" x="990" y="112" text-anchor="middle">OpenCV</text>
-  <text class="text" x="990" y="142" text-anchor="middle">Mask / box render</text>
-  <text class="text" x="990" y="165" text-anchor="middle">Optional audio mux</text>
-  <text class="text" x="550" y="230" text-anchor="middle">Local redaction aid: detection, tracking, and masks can fail; review the complete export.</text>
-  <text class="text" x="550" y="254" text-anchor="middle">Video-scoped bearer APIs + short-lived derived-media links; local capability control is not multi-user auth.</text>
+
+  <rect width="1200" height="560" fill="#f7f5f0"/>
+  <text class="heading" x="40" y="45">Local-first data flow and privacy boundaries</text>
+  <text class="small" x="40" y="68">Possession-based capabilities reduce accidental exposure; they are not user identity, TLS, tenant isolation, or proof of anonymity.</text>
+
+  <rect class="box" x="40" y="105" width="210" height="125"/>
+  <text class="title" x="145" y="137" text-anchor="middle">React operator UI</text>
+  <text class="text" x="145" y="167" text-anchor="middle">Upload + choose creator</text>
+  <text class="text" x="145" y="190" text-anchor="middle">Audio policy + review</text>
+  <text class="small" x="145" y="213" text-anchor="middle">holds session capability</text>
+
+  <rect class="box" x="300" y="105" width="220" height="125"/>
+  <text class="title" x="410" y="137" text-anchor="middle">FastAPI capability gate</text>
+  <text class="text" x="410" y="167" text-anchor="middle">video-scoped bearer checks</text>
+  <text class="text" x="410" y="190" text-anchor="middle">signed media issuance</text>
+  <text class="small" x="410" y="213" text-anchor="middle">preview / process / job / delete</text>
+
+  <rect class="private" x="570" y="105" width="250" height="125"/>
+  <text class="title" x="695" y="137" text-anchor="middle">Private session storage</text>
+  <text class="text" x="695" y="167" text-anchor="middle">raw source + preview frames</text>
+  <text class="text" x="695" y="190" text-anchor="middle">server-owned people manifest</text>
+  <text class="small" x="695" y="213" text-anchor="middle">0700 dirs · 0600 files · 24h TTL</text>
+
+  <rect class="private" x="870" y="105" width="290" height="125"/>
+  <text class="title" x="1015" y="137" text-anchor="middle">Derived media only</text>
+  <text class="text" x="1015" y="167" text-anchor="middle">preview JPEG + per-job MP4</text>
+  <text class="text" x="1015" y="190" text-anchor="middle">5-minute artifact-bound URLs</text>
+  <text class="small" x="1015" y="213" text-anchor="middle">private/no-store · safe download name</text>
+
+  <path class="arrow" d="M250 168 H300"/>
+  <path class="arrow" d="M520 168 H570"/>
+
+  <rect class="box" x="300" y="320" width="220" height="135"/>
+  <text class="title" x="410" y="352" text-anchor="middle">Upload-time anchor</text>
+  <text class="text" x="410" y="382" text-anchor="middle">selected server manifest bbox</text>
+  <text class="text" x="410" y="405" text-anchor="middle">+ raw preview appearance</text>
+  <text class="small" x="410" y="430" text-anchor="middle">client bbox/people input is forbidden</text>
+
+  <rect class="decision" x="570" y="300" width="250" height="175"/>
+  <text class="title" x="695" y="334" text-anchor="middle">In-process render worker</text>
+  <text class="text" x="695" y="364" text-anchor="middle">YOLOv8n-seg + ByteTrack</text>
+  <text class="text" x="695" y="387" text-anchor="middle">compare every candidate to anchor</text>
+  <text class="text" x="695" y="410" text-anchor="middle">uncertain identity → blur all detections</text>
+  <text class="small" x="695" y="437" text-anchor="middle">DELETE / TTL signals frame + FFmpeg cancellation</text>
+  <text class="small" x="695" y="457" text-anchor="middle">jobs remain memory-only</text>
+
+  <rect class="box" x="870" y="320" width="290" height="135"/>
+  <text class="title" x="1015" y="352" text-anchor="middle">OpenCV render + FFmpeg export</text>
+  <text class="text" x="1015" y="382" text-anchor="middle">mask or padded-box blur</text>
+  <text class="text" x="1015" y="405" text-anchor="middle">audio removed by default</text>
+  <text class="small" x="1015" y="430" text-anchor="middle">output is a review candidate, not approval</text>
+
+  <path class="arrow" d="M695 230 V270 H410 V320"/>
+  <path class="arrow" d="M520 387 H570"/>
+  <path class="arrow" d="M820 387 H870"/>
+  <path class="arrow" d="M1015 320 V230"/>
+  <path class="return" d="M870 205 H850 V505 H145 V230"/>
+  <text class="small" x="500" y="526" text-anchor="middle">short-lived preview/output capabilities return through the API; raw source has no HTTP route</text>
 </svg>

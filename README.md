@@ -18,10 +18,10 @@ gait, and context can still identify someone. Treat every result as a review
 candidate, not as safe-to-publish output. Read the
 [threat model and human-review guide](docs/threat-model.md).
 
-![PublishSafe original and processed video comparison](docs/demo.gif)
+![Current PublishSafe upload and review UI](docs/ui-overview.png)
 
-The GIF demonstrates the workflow on repository sample material. It is not an
-accuracy benchmark, proof of anonymity, or current UI acceptance test.
+This screenshot is generated from the current UI without uploaded media. It
+documents product framing and review warnings, not model accuracy or privacy.
 
 ## 30-second review
 
@@ -30,7 +30,7 @@ accuracy benchmark, proof of anonymity, or current UI acceptance test.
 | What is it? | A one-visible-creator video-redaction workflow for trusted localhost use |
 | Core pipeline | Upload → YOLO person candidates → ByteTrack IDs → creator selection → mask blur/avatar overlay → OpenCV/FFmpeg export |
 | Backend scope | Capability-scoped media APIs, private storage/retention, in-process job progress, video I/O, model/tracker integration, and fail-closed decision logic |
-| Evidence | Model-free Python tests, React production build, Compose validation, deterministic evaluation-metric tests, and a manual sample workflow |
+| Evidence | Model-free Python tests, React production build, Compose validation, deterministic evaluation-metric tests, and a documented manual sample recipe |
 | Current maturity | Portfolio MVP; not a hosted service, certified anonymizer, identity system, or unattended publishing tool |
 | Missing evidence | No checked-in real-video benchmark, real-YOLO CI, privacy certification, public deployment, or proof that identity is removed |
 
@@ -44,7 +44,7 @@ identity tracking or a formal security boundary.
 1. Upload an MP4, MOV, AVI, MKV, or WebM video.
 2. Generate a preview from YOLO person detections and ByteTrack IDs.
 3. Select the creator who may remain visible.
-4. Preview an adjustable blur or experimental avatar overlay.
+4. Preview adjustable blur strength, or configure an experimental avatar for the render.
 5. Render a short proxy preview or every decoded source frame.
 6. Review and download the processed MP4.
 
@@ -53,6 +53,11 @@ selected creator**:
 
 - missing, invalid, empty, or obviously degraded masks fall back to a padded
   bounding-box blur;
+- preview candidates and boxes come from a private server-owned manifest; the
+  frame-preview API rejects client-supplied candidate geometry;
+- the full render compares candidates with the appearance reference derived
+  from the upload-time selected preview, rather than trusting a recycled
+  tracker integer;
 - the selected track is exempted only when conservative appearance and
   detection checks are strong and unambiguous;
 - ambiguous creator tracking blurs every detected person on that frame instead
@@ -84,7 +89,10 @@ A short preview is not acceptance testing. Review the complete exported file.
 - Media responses use private/no-store, no-referrer, and nosniff headers.
 - Private directories use owner-only permissions (0700); files use 0600.
 - Sessions expire after 24 hours by default. “Change video” calls the delete
-  endpoint immediately, and a startup/periodic janitor removes expired media.
+  endpoint immediately, active frame/FFmpeg work receives cancellation, and a
+  startup/periodic janitor removes expired media.
+- The UI can refresh expired preview/output capabilities through a
+  session-authorized route. Download responses use a fixed non-secret filename.
 - Docker Compose publishes the web entry point only on
   `127.0.0.1:5173`.
 
@@ -105,8 +113,8 @@ CI runs three jobs:
 
 | Job | Scope |
 | --- | --- |
-| Python tests | API validation and dispatch, capability scope/expiry, raw-route denial, deletion/TTL cleanup, traversal/symlink rejection, permissions, mask fallback, creator-exemption decisions, audio policy, processing failure cleanup, and metric math |
-| Frontend build | Clean install and React production build |
+| Python tests | API validation and dispatch, capability scope/expiry, raw-route denial, server-owned selection manifests and upload-time anchors, active-job cancellation, deletion/TTL cleanup, preview refresh, safe download names, traversal/symlink rejection, permissions, mask fallback, creator-exemption decisions, audio policy, processing failure cleanup, and metric math |
+| Frontend build | Clean install, high-severity dependency audit, and React production build |
 | Compose config | Docker Compose configuration parsing |
 
 The Python suite is deliberately model-free. It installs
@@ -225,15 +233,17 @@ Validate Compose:
 docker compose config --quiet
 ```
 
-For a manual workflow, generate sample material based on the Ultralytics bus
-image, then upload it through the UI:
+For a local manual recipe, the helper can generate motion from an external
+Ultralytics sample image, then you can upload it through the UI:
 
 ```bash
 ./scripts/download_sample.sh
 ```
 
-The sample script requires `curl` and FFmpeg. Manual observation is not a
-benchmark.
+The helper requires `curl` and FFmpeg. It downloads a mutable third-party asset
+whose license and immutable hash are not asserted by this repository, so it is
+excluded from release evidence and must not be redistributed without an
+independent provenance/license check. Manual observation is not a benchmark.
 
 ## API surface
 
@@ -241,10 +251,13 @@ benchmark.
   and return a video-scoped bearer capability
 - `POST /api/frame-preview`: create a derived frame preview (session
   capability required)
+- `GET /api/videos/{video_id}/preview-capability`: refresh one derived preview
+  URL (session capability required)
 - `POST /api/process`: start a render job (session capability required)
 - `GET /api/jobs/{job_id}`: poll status and refresh a derived-output URL
   (session capability required)
-- `GET /api/media/{capability}`: retrieve one short-lived preview or output
+- `GET /api/media/{capability}`: retrieve one short-lived preview or output;
+  output requests may opt into a fixed-name attachment response
 - `DELETE /api/videos/{video_id}`: delete the scoped source and derived media
 - `GET /api/health`: report model/tracker/runtime configuration
 

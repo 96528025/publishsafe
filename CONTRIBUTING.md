@@ -35,6 +35,7 @@ npm run dev
   video, audio, frames, masks, outputs, filenames/paths, or unredacted logs.
 - Use the public sample generator or synthetic test clips.
 - Run `python -m compileall backend/app`.
+- Install `backend/requirements-test.txt` and run `pytest`.
 - Run `npm run build` from `frontend/`.
 - Describe tracking, privacy, or performance tradeoffs in the PR.
 

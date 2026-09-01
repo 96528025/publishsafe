@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PersonPreview(BaseModel):
@@ -33,10 +33,11 @@ class ProcessRequest(BaseModel):
 
 
 class FramePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     video_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     selected_track_id: int = Field(ge=1)
     blur_strength: int = Field(default=40, ge=10, le=100)
-    people: list[PersonPreview]
 
 
 class FramePreviewResponse(BaseModel):

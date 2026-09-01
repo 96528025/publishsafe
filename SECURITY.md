@@ -5,6 +5,16 @@ anonymization system. Use the current `main` branch or latest published release
 when reproducing a problem. The project does not currently promise a security
 support window or response-time SLA.
 
+## Supported versions
+
+| Version | Security fixes |
+| --- | --- |
+| Current `main` | Best-effort fixes and reports accepted |
+| Latest published release | Reports accepted; update to `main` may be required |
+| Older tags and forks | Not supported |
+
+Version support is not a certification, warranty, or incident-response SLA.
+
 ## Report a vulnerability privately
 
 Use a [private GitHub Security Advisory](https://github.com/96528025/publishsafe/security/advisories/new)

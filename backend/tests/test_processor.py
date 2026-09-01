@@ -167,6 +167,134 @@ class SequenceDetector:
         ]
 
 
+class SingleTrackDetector:
+    device = "cpu"
+
+    def __init__(self, track):
+        self.track_value = track
+
+    def reset_tracking(self):
+        pass
+
+    def track(self, frame):  # noqa: ARG002
+        return [self.track_value]
+
+
+def run_single_frame_job(
+    video_session,
+    monkeypatch,
+    *,
+    track: Track,
+    creator_appearance,
+):
+    video_session(VALID_VIDEO_ID)
+    frame = np.zeros((120, 160, 3), dtype=np.uint8)
+    monkeypatch.setattr(
+        processor.cv2,
+        "VideoCapture",
+        lambda _: FakeCapture([frame]),
+    )
+    monkeypatch.setattr(
+        processor.cv2,
+        "VideoWriter",
+        lambda path, *args: FakeWriter(path),
+    )
+    monkeypatch.setattr(processor.cv2, "VideoWriter_fourcc", lambda *args: 0)
+    monkeypatch.setattr(processor.shutil, "which", lambda _: None)
+    monkeypatch.setattr(
+        processor,
+        "appearance_histogram",
+        lambda frame, bbox: np.array([bbox[0]], dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        processor,
+        "appearance_distance",
+        lambda reference, candidate: abs(float(reference[0] - candidate[0])) / 100,
+    )
+    monkeypatch.setattr(
+        processor,
+        "load_avatar",
+        lambda _: np.zeros((8, 8, 4), dtype=np.uint8),
+    )
+    blurred = []
+    monkeypatch.setattr(
+        processor,
+        "blur_person",
+        lambda frame, bbox, strength, mask: blurred.append(bbox),
+    )
+    monkeypatch.setattr(processor, "overlay_avatar", lambda *args: None)
+    job_id = create_job(VALID_VIDEO_ID, audio_policy="remove")
+
+    process_video(
+        job_id,
+        VALID_VIDEO_ID,
+        selected_track_id=1,
+        mode="avatar",
+        avatar_style="sunny",
+        blur_strength=60,
+        process_scope="full",
+        detector=SingleTrackDetector(track),
+        audio_policy="remove",
+        creator_appearance=creator_appearance,
+    )
+    return processor.jobs[job_id], blurred
+
+
+def test_recycled_numeric_track_id_cannot_replace_upload_selected_creator(
+    video_session, monkeypatch
+):
+    wrong_person = Track(1, (90, 10, 130, 100), 0.95)
+
+    job, blurred = run_single_frame_job(
+        video_session,
+        monkeypatch,
+        track=wrong_person,
+        creator_appearance=np.array([10], dtype=np.float32),
+    )
+
+    assert job["status"] == "complete"
+    assert job["conservative_fallback_frames"] == 1
+    assert blurred == [wrong_person.bbox]
+
+
+def test_changed_track_id_is_exempt_only_with_unique_upload_anchor_match(
+    video_session, monkeypatch
+):
+    matched_person = Track(7, (10, 10, 50, 100), 0.95)
+
+    job, blurred = run_single_frame_job(
+        video_session,
+        monkeypatch,
+        track=matched_person,
+        creator_appearance=np.array([10], dtype=np.float32),
+    )
+
+    assert job["status"] == "complete"
+    assert job["conservative_fallback_frames"] == 0
+    assert blurred == []
+
+
+@pytest.mark.parametrize(
+    "invalid_anchor",
+    [None, np.array([], dtype=np.float32), np.array([np.nan], dtype=np.float32)],
+)
+def test_missing_or_invalid_upload_anchor_blurs_every_detected_person(
+    video_session, monkeypatch, invalid_anchor
+):
+    detected_person = Track(1, (10, 10, 50, 100), 0.95)
+
+    job, blurred = run_single_frame_job(
+        video_session,
+        monkeypatch,
+        track=detected_person,
+        creator_appearance=invalid_anchor,
+    )
+
+    assert job["status"] == "complete"
+    assert job["conservative_fallback_frames"] == 1
+    assert blurred == [detected_person.bbox]
+
+
 def test_ambiguous_reid_blurs_everyone_and_records_the_fallback(
     video_session, monkeypatch
 ):
@@ -231,6 +359,7 @@ def test_ambiguous_reid_blurs_everyone_and_records_the_fallback(
         process_scope="full",
         detector=SequenceDetector(),
         audio_policy="remove",
+        creator_appearance=np.array([10], dtype=np.float32),
     )
 
     job = processor.jobs[job_id]

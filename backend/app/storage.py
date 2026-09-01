@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import json
+import math
 import os
 import re
 import shutil
 import time
 from pathlib import Path
+from typing import Any
 
 from .config import ALLOWED_EXTENSIONS, MEDIA_TTL_SECONDS, OUTPUT_DIR, UPLOAD_DIR
 
 VIDEO_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 JOB_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 EXPIRY_FILENAME = ".expires_at"
+PREVIEW_MANIFEST_FILENAME = "preview_people.json"
+PREVIEW_MANIFEST_MAX_BYTES = 1024 * 1024
+
+
+class PreviewManifestError(ValueError):
+    """The server-owned upload-preview manifest is missing or invalid."""
 
 
 def _validated_id(value: str, pattern: re.Pattern[str], label: str) -> str:
@@ -61,6 +70,90 @@ def create_upload_session(video_id: str, expires_at: float) -> Path:
 def open_private_binary(path: Path):
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     return os.fdopen(descriptor, "wb")
+
+
+def _normalize_preview_person(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise PreviewManifestError("preview person must be an object")
+    if set(value) != {"track_id", "bbox", "confidence"}:
+        raise PreviewManifestError("preview person has unexpected fields")
+
+    track_id = value["track_id"]
+    bbox = value["bbox"]
+    confidence = value["confidence"]
+    if isinstance(track_id, bool) or not isinstance(track_id, int) or track_id < 1:
+        raise PreviewManifestError("preview track id is invalid")
+    if (
+        not isinstance(bbox, list)
+        or len(bbox) != 4
+        or any(isinstance(item, bool) or not isinstance(item, int) for item in bbox)
+    ):
+        raise PreviewManifestError("preview bounding box is invalid")
+    x1, y1, x2, y2 = bbox
+    if min(bbox) < 0 or x2 <= x1 or y2 <= y1:
+        raise PreviewManifestError("preview bounding box is invalid")
+    if (
+        isinstance(confidence, bool)
+        or not isinstance(confidence, (int, float))
+        or not math.isfinite(float(confidence))
+        or not 0.0 <= float(confidence) <= 1.0
+    ):
+        raise PreviewManifestError("preview confidence is invalid")
+    return {
+        "track_id": track_id,
+        "bbox": [x1, y1, x2, y2],
+        "confidence": float(confidence),
+    }
+
+
+def write_preview_manifest(video_id: str, people: list[dict[str, Any]]) -> Path:
+    """Persist detector-owned preview candidates; never trust client copies."""
+
+    normalized = [_normalize_preview_person(person) for person in people]
+    track_ids = [person["track_id"] for person in normalized]
+    if len(track_ids) != len(set(track_ids)):
+        raise PreviewManifestError("preview track ids must be unique")
+    payload = json.dumps(
+        {"version": 1, "people": normalized},
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(payload) > PREVIEW_MANIFEST_MAX_BYTES:
+        raise PreviewManifestError("preview manifest is too large")
+
+    path = upload_session_dir(video_id) / PREVIEW_MANIFEST_FILENAME
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "wb") as output:
+        output.write(payload)
+    return path
+
+
+def load_preview_manifest(video_id: str) -> list[dict[str, Any]]:
+    path = upload_session_dir(video_id) / PREVIEW_MANIFEST_FILENAME
+    if path.is_symlink() or not path.is_file():
+        raise PreviewManifestError("preview manifest is unavailable")
+    try:
+        if path.stat().st_size > PREVIEW_MANIFEST_MAX_BYTES:
+            raise PreviewManifestError("preview manifest is too large")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise PreviewManifestError("preview manifest is unreadable") from exc
+    if not isinstance(payload, dict) or set(payload) != {"version", "people"}:
+        raise PreviewManifestError("preview manifest has unexpected fields")
+    if payload["version"] != 1 or not isinstance(payload["people"], list):
+        raise PreviewManifestError("preview manifest version is unsupported")
+    normalized = [_normalize_preview_person(person) for person in payload["people"]]
+    track_ids = [person["track_id"] for person in normalized]
+    if len(track_ids) != len(set(track_ids)):
+        raise PreviewManifestError("preview track ids must be unique")
+    return normalized
+
+
+def resolve_private_preview_frame(video_id: str) -> Path:
+    """Resolve the upload-time raw preview for internal anchor generation only."""
+
+    candidate = upload_session_dir(video_id) / "raw_preview.jpg"
+    return _resolved_private_file(candidate, UPLOAD_DIR)
 
 
 def prepare_job_output(video_id: str, job_id: str) -> Path:

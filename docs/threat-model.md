@@ -41,9 +41,17 @@ same video. Raw uploads are not mounted as public static routes.
 
 Preview and output responses use HMAC-signed, artifact-scoped media capability
 URLs that expire after five minutes. Media responses include private/no-store
-cache headers. The UI refreshes an output URL through the capability-protected
-job endpoint rather than relying on a permanent link. Docker Compose binds the
-web entry point to `127.0.0.1` by default.
+cache headers. The UI refreshes preview URLs through a capability-protected
+preview endpoint and output URLs through the protected job endpoint rather than
+relying on permanent links. Docker Compose binds the web entry point to
+`127.0.0.1` by default.
+
+Upload-time person candidates and boxes are persisted in an owner-only,
+server-owned JSON manifest. The frame-preview API does not accept client
+candidate geometry. When processing starts, the backend derives the selected
+creator's appearance reference from the stored upload preview and selected
+server manifest entry; a new render never establishes identity merely because
+ByteTrack reused the same numeric ID.
 
 These are local capability controls, not identity-aware authentication. Anyone
 who obtains a live bearer or signed media capability can exercise its scope.
@@ -60,6 +68,13 @@ default 24-hour TTL. Cleanup is ordinary filesystem deletion, not secure erase;
 copies can remain in open handles, browser/device caches, backups, snapshots,
 or recovery storage.
 
+DELETE and TTL cleanup signal cancellation to active frame processing and the
+current FFmpeg process, revoke job/media records, and remove the session.
+Cancellation is cooperative around native model/video calls: a call already in
+progress can retain an open handle until it returns. This is still ordinary
+filesystem deletion, not secure erase or proof that every downstream copy is
+gone.
+
 ## Primary privacy failures
 
 ### Detection, segmentation, and temporal coverage
@@ -72,8 +87,10 @@ or recovery storage.
 - Mask fallback can cover a bounding box rather than the exact body, yet still
   miss signals outside it.
 - ByteTrack IDs can switch, disappear, or be reassigned during crossings and
-  occlusions. Clothing-histogram recovery is a heuristic, not identity
-  verification. It can preserve the wrong person or redact the creator.
+  occlusions. Comparing candidates with the upload-time selected person's
+  clothing histogram reduces direct trust in recycled IDs, but remains an
+  uncalibrated heuristic rather than identity verification. It can preserve the
+  wrong person or redact the creator.
 - Frame-level flicker can expose a person even when average recall looks high.
   The evaluation harness therefore reports the longest missed run for the same
   annotated ground-truth person/track, but box coverage still does not inspect
@@ -128,7 +145,8 @@ evidence appropriate to the use case.
 - Session bearer capabilities live in the browser state. Signed derived-media
   URLs remain usable by their holder until their short expiry.
 - The default TTL is a cleanup bound, not proof that every copy has vanished at
-  exactly 24 hours. Active jobs can delay removal, and backups/caches are
+  exactly 24 hours. Active jobs receive cancellation, but an in-flight native
+  call/open handle can finish releasing after the request; backups/caches are
   outside the cleanup boundary.
 - Logs, screenshots, shell history, browser cache, backups, cloud-sync tools,
   and crash reports can create additional copies.
@@ -147,11 +165,12 @@ capability model is not a substitute for TLS and multi-user access control.
 | Host-local processing | Avoids an intentional third-party inference upload | Access control, deletion, or isolation on the host |
 | Video-scoped bearer capability | Restricts preview/process/job/delete APIs to a holder of the upload session secret | User identity, TLS, multi-user isolation, or safety after token theft |
 | Five-minute signed media URLs + no-store headers | Replaces permanent/raw media routes and limits link lifetime/cache intent | Revocation of a copied live link, hostile clients, screenshots, or downstream copies |
-| Default 24-hour TTL + `DELETE` | Bounds normal on-host session retention and supports early removal | Secure erase, exact deletion from open handles/backups, or legal retention compliance |
+| Default 24-hour TTL + `DELETE` + active-job cancellation | Bounds normal on-host session retention, revokes capabilities, and asks frame/FFmpeg work to stop | Secure erase, instantaneous release of an in-flight native handle, deletion from backups, or legal retention compliance |
 | Localhost-only Compose binding | Reduces accidental LAN/public exposure in the default profile | Safety if the operator changes binding/proxy rules or the host is compromised |
 | Person segmentation plus dilation/feathering | Obscures many detected person pixels | Complete body coverage or irreversible anonymization |
 | Corrupt-mask fallback to padded box | Avoids silently trusting an obviously broken/missing mask | Calibrated adequacy or detection of every incomplete-but-plausible mask |
-| Every-frame processing | Avoids deliberate detector frame skipping | Detection success on every frame |
+| Full-render every-frame processing | Avoids deliberate detector frame skipping in a full render; short previews may sample frames | Detection success on every frame |
+| Server-owned preview manifest + upload-time creator anchor | Prevents client bbox omission/spoofing and direct trust in a recycled tracker integer | Calibrated identity association or protection when appearance evidence itself is misleading |
 | Conservative ambiguous-ReID fallback | Blurs all detected people instead of guessing a creator exemption | Calibrated thresholds, detection of missed people, or correct identity association |
 | Audio removed by default | Avoids retaining source voices/names unless explicitly requested | Visual/contextual anonymity or protection when preservation is opted into |
 | Single-frame and short previews | Supports early visual inspection | Full-video or audio review |

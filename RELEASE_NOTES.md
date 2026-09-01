@@ -1,12 +1,19 @@
 # PublishSafe release notes
 
-## Unreleased — evaluation and documentation hardening
+## v0.2.0 — private media and fail-closed defaults
 
 - Replaced raw upload/output routes with video-scoped bearer APIs and
   five-minute HMAC-signed derived-media URLs carrying private/no-store headers.
 - Added a default 24-hour media-session TTL, early `DELETE`, restricted file
-  permissions, and localhost-only Compose binding. These are local capability
-  controls, not multi-user authentication, TLS, or secure erase.
+  permissions, active frame/FFmpeg cancellation, and localhost-only Compose
+  binding. These are local capability controls, not multi-user authentication,
+  TLS, or secure erase.
+- Moved preview candidates and boxes behind a server-owned private manifest.
+  Client-supplied candidate geometry is rejected, and full rendering starts
+  from the selected upload-preview appearance anchor instead of trusting a
+  recycled tracker integer.
+- Added session-authorized preview-capability refresh, fixed-name attachment
+  downloads, and UI reporting when deletion is not confirmed.
 - Changed the default audio policy to removal. Explicit preservation fails the
   job if it cannot be honored instead of silently changing policy.
 - Added conservative padded-box fallback for obviously corrupt/missing masks
@@ -25,10 +32,14 @@
   review checklist, sensitive-media reporting rules, and safe issue forms.
 - Reordered the README around a recruiter review path and separated automated
   evidence from unverified ML, privacy, performance, and deployment claims.
+- Refreshed transitive frontend build dependencies. On 2026-09-01,
+  `npm audit --audit-level=low` against the npm registry reported zero known
+  vulnerabilities for the prepared lockfile; this is a time-bound release
+  check, not a permanent guarantee.
 
-The evaluation/documentation work itself does not alter runtime behavior; the
-runtime controls above are separately implemented in the same unreleased
-hardening set. No release or tag has been created for it.
+This release keeps jobs in memory and uses FastAPI background tasks; it does
+not add the deferred durable-worker/PostgreSQL control plane. No real-video
+privacy benchmark is claimed.
 
 ## v0.1.0
 

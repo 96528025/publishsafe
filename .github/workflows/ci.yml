@@ -53,6 +53,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Audit dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
       # The project has no frontend test framework; a clean production build is
       # the meaningful signal here.
       - name: Production build

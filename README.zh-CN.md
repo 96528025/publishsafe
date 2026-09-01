@@ -16,10 +16,10 @@ PublishSafe 由 React、FastAPI、YOLOv8n-seg、ByteTrack、OpenCV 和 FFmpeg
 待复核版本，而不是可直接发布的安全成片。详见
 [威胁模型与人工复核指南](docs/threat-model.md)。
 
-![PublishSafe 原视频与处理后视频对比](docs/demo.gif)
+![当前 PublishSafe 上传与复核界面](docs/ui-overview.png)
 
-该动图只演示仓库样例上的流程，不是准确率 benchmark、匿名证明或当前 UI
-验收结果。
+该截图由当前界面在未上传媒体时生成，只用于记录产品定位与复核提醒，不是模型
+准确率或隐私证明。
 
 ## 30 秒了解项目
 
@@ -28,7 +28,7 @@ PublishSafe 由 React、FastAPI、YOLOv8n-seg、ByteTrack、OpenCV 和 FFmpeg
 | 做什么 | 在可信本机上处理“一名创作者保持可见”的视频人物遮挡 |
 | 核心链路 | 上传 → YOLO 人物候选 → ByteTrack ID → 选择创作者 → mask 模糊/头像覆盖 → OpenCV/FFmpeg 导出 |
 | 后端重点 | capability 限权媒体 API、私有存储与 TTL、进程内任务进度、视频 I/O、模型/追踪集成和 fail-closed 决策 |
-| 已有证据 | model-free Python 测试、React production build、Compose 校验、确定性评估指标测试和人工样例流程 |
+| 已有证据 | model-free Python 测试、React production build、Compose 校验、确定性评估指标测试和有文档的人工样例 recipe |
 | 当前成熟度 | 作品集 MVP；不是托管服务、认证匿名化工具、多用户系统或无人值守发布工具 |
 | 尚无证据 | 没有仓库内真实视频 benchmark、真实 YOLO CI、隐私认证、公网部署或身份已被移除的证明 |
 
@@ -41,13 +41,17 @@ PublishSafe 由 React、FastAPI、YOLOv8n-seg、ByteTrack、OpenCV 和 FFmpeg
 1. 上传 MP4、MOV、AVI、MKV 或 WebM。
 2. 根据 YOLO 人物检测和 ByteTrack ID 生成预览。
 3. 选择一名可能保持可见的创作者。
-4. 预览可调节模糊，或使用实验性的头像覆盖。
+4. 预览可调节模糊；也可为正式渲染配置实验性头像覆盖。
 5. 生成短代理预览，或处理每一个解码到的源视频帧。
 6. 人工复核并下载处理后的 MP4。
 
 默认策略是**尝试遮挡每一个已检测人物，仅豁免选中的创作者**：
 
 - mask 缺失、非法、全零或明显退化时，回退到带边距方框模糊；
+- 预览候选人与 bbox 来自服务端私有 manifest；单帧预览接口拒绝客户端提交
+  候选人几何信息；
+- 正式渲染使用上传预览中所选人物生成的外观锚点，而不是信任重新分配的
+  tracker 数字 ID；
 - 只有检测置信度与外观证据足够强且没有歧义，当前轨迹才会被豁免；
 - 创作者追踪不确定时，该帧所有已检测人物都会被模糊，而不是猜测身份；
 - 默认移除源音频；保留音频必须显式选择，FFmpeg 无法满足时任务会明确失败。
@@ -63,8 +67,10 @@ PublishSafe 由 React、FastAPI、YOLOv8n-seg、ByteTrack、OpenCV 和 FFmpeg
 - 派生预览和输出使用 5 分钟 HMAC 签名 URL；输出 URL 还绑定具体 job。
 - 媒体响应带有 private/no-store、no-referrer 和 nosniff。
 - 私有目录权限为 0700，文件为 0600。
-- 会话默认 24 小时过期；“更换视频”会立即调用删除接口，启动与周期清理任务
-  会移除过期媒体。
+- 会话默认 24 小时过期；“更换视频”会立即调用删除接口，运行中的逐帧处理与
+  FFmpeg 会收到取消信号，启动与周期清理任务会移除过期媒体。
+- UI 可通过需要 session capability 的接口刷新过期预览/输出链接；下载响应使用
+  固定且不含 secret 的文件名。
 - Docker Compose 默认只发布到 `127.0.0.1:5173`。
 
 这些控制降低本机误暴露风险，但 capability 只是“持有者可访问”的令牌，不是
@@ -80,8 +86,8 @@ CI 包含三个任务：
 
 | 任务 | 覆盖范围 |
 | --- | --- |
-| Python 测试 | 请求校验、capability 范围/过期、禁止原片路由、删除/TTL、路径穿越和软链接拒绝、权限、mask 回退、创作者豁免、音频策略、失败清理与指标数学 |
-| 前端构建 | 全新安装后的 React production build |
+| Python 测试 | 请求校验、capability 范围/过期、禁止原片路由、服务端选择 manifest 与上传时锚点、活跃任务取消、删除/TTL、预览刷新、安全下载名、路径穿越和软链接拒绝、权限、mask 回退、创作者豁免、音频策略、失败清理与指标数学 |
+| 前端构建 | 全新安装、高危 dependency audit 与 React production build |
 | Compose | Docker Compose 配置解析 |
 
 Python 测试采用 model-free 设计：不会加载 Ultralytics/PyTorch、下载模型或
@@ -174,21 +180,26 @@ npm run build
 docker compose config --quiet
 ```
 
-人工样例流程：
+本地人工样例 recipe：
 
 ```bash
 ./scripts/download_sample.sh
 ```
 
-样例脚本需要 `curl` 和 FFmpeg。人工观看不是 benchmark。
+样例脚本需要 `curl` 和 FFmpeg。它会下载一个可变的第三方素材；本仓库不为其
+声明许可或不可变 hash，因此它不属于 release evidence。未经独立核实来源与
+许可，不应重新分发生成物。人工观看也不是 benchmark。
 
 ## API
 
 - `POST /api/upload`：建立私有会话、分析视频并返回 session capability
 - `POST /api/frame-preview`：生成派生单帧预览，需要 session capability
+- `GET /api/videos/{video_id}/preview-capability`：刷新一个派生预览链接，需要
+  session capability
 - `POST /api/process`：启动处理任务，需要 session capability
 - `GET /api/jobs/{job_id}`：查询状态并刷新输出链接，需要 session capability
-- `GET /api/media/{capability}`：读取一个短时预览或输出
+- `GET /api/media/{capability}`：读取一个短时预览或输出；输出可请求使用固定
+  文件名的 attachment 响应
 - `DELETE /api/videos/{video_id}`：删除该会话的源文件与全部派生媒体
 - `GET /api/health`：返回模型、追踪和运行配置
 

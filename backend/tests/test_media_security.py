@@ -38,7 +38,6 @@ def test_video_specific_api_operations_reject_a_bare_uuid(
         json={
             "video_id": VIDEO_A,
             "selected_track_id": 1,
-            "people": [],
         },
     )
     job = api.get(f"/api/jobs/{JOB_ID}")
@@ -98,6 +97,34 @@ def test_short_lived_media_capability_controls_preview_and_disables_caching(
     assert response.headers["pragma"] == "no-cache"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_preview_capability_can_be_refreshed_only_with_the_session_capability(
+    api, video_session
+):
+    directory, token = video_session(VIDEO_A)
+    preview = directory / "detected_preview.jpg"
+    preview.write_bytes(b"preview")
+    preview.chmod(0o600)
+
+    unauthenticated = api.get(
+        f"/api/videos/{VIDEO_A}/preview-capability?variant=detected"
+    )
+    invalid_variant = api.get(
+        f"/api/videos/{VIDEO_A}/preview-capability?variant=source",
+        headers=authorized(token),
+    )
+    refreshed = api.get(
+        f"/api/videos/{VIDEO_A}/preview-capability?variant=detected",
+        headers=authorized(token),
+    )
+
+    assert unauthenticated.status_code == 401
+    assert invalid_variant.status_code == 422
+    assert refreshed.status_code == 200
+    refreshed_url = refreshed.json()["preview_url"]
+    assert refreshed_url.startswith("/api/media/")
+    assert api.get(refreshed_url).content == b"preview"
 
 
 def test_expired_media_capability_is_rejected(api, video_session):
@@ -240,6 +267,7 @@ def test_job_status_returns_a_controlled_output_capability(
     )
     output_url = status_response.json()["output_url"]
     media_response = api.get(output_url)
+    download_response = api.get(f"{output_url}?download=1")
 
     assert status_response.status_code == 200
     assert output_url.startswith("/api/media/")
@@ -247,6 +275,11 @@ def test_job_status_returns_a_controlled_output_capability(
     assert media_response.status_code == 200
     assert media_response.content == b"finished video"
     assert media_response.headers["cache-control"].startswith("private, no-store")
+    assert "content-disposition" not in media_response.headers
+    disposition = download_response.headers["content-disposition"]
+    assert disposition.startswith("attachment;")
+    assert "publishsafe-output.mp4" in disposition
+    assert output_url.rsplit("/", 1)[-1] not in disposition
 
 
 def test_media_url_is_revoked_when_session_ttl_elapses(

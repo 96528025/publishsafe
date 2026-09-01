@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import cv2
+import numpy as np
 from fastapi import (
     BackgroundTasks,
     FastAPI,
@@ -14,6 +15,7 @@ from fastapi import (
     Header,
     HTTPException,
     Path as ApiPath,
+    Query,
     Response,
     UploadFile,
 )
@@ -37,7 +39,13 @@ from .config import (
     RUNTIME_PROFILE,
     VIDEO_ENCODER,
 )
-from .processor import create_job, jobs, jobs_lock, process_video
+from .processor import (
+    cancel_video_jobs,
+    create_job,
+    jobs,
+    jobs_lock,
+    process_video,
+)
 from .schemas import (
     FramePreviewRequest,
     FramePreviewResponse,
@@ -46,19 +54,29 @@ from .schemas import (
     UploadResponse,
 )
 from .storage import (
+    PreviewManifestError,
     cleanup_expired_media as cleanup_storage,
     create_upload_session,
     delete_video_media,
     find_video,
+    load_preview_manifest,
     open_private_binary,
     resolve_output,
+    resolve_private_preview_frame,
     resolve_preview,
     secure_file,
     session_exists,
     tighten_existing_permissions,
     upload_session_dir,
+    write_preview_manifest,
 )
-from .vision import PersonDetector, blur_person, draw_preview, ensure_avatar_assets
+from .vision import (
+    PersonDetector,
+    appearance_histogram,
+    blur_person,
+    draw_preview,
+    ensure_avatar_assets,
+)
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
@@ -95,13 +113,26 @@ def cleanup_expired_media(*, now: float | None = None) -> set[str]:
             for job in jobs.values()
             if job.get("status") in {"queued", "processing"}
         }
-    removed = cleanup_storage(now=now, preserve_video_ids=active_video_ids)
+    live_active_video_ids = {
+        video_id
+        for video_id in active_video_ids
+        if session_exists(video_id, now=now)
+    }
+    for video_id in active_video_ids - live_active_video_ids:
+        cancel_video_jobs(video_id, drop_records=True)
+
+    removed = cleanup_storage(
+        now=now, preserve_video_ids=live_active_video_ids
+    )
+    with jobs_lock:
+        stale_video_ids = {
+            job["video_id"]
+            for job in jobs.values()
+            if not session_exists(job["video_id"], now=now)
+        }
+    for video_id in stale_video_ids:
+        cancel_video_jobs(video_id, drop_records=True)
     if removed:
-        with jobs_lock:
-            for job_id in [
-                key for key, job in jobs.items() if job.get("video_id") in removed
-            ]:
-                jobs.pop(job_id, None)
         logger.info("Expired media removed for %d session(s)", len(removed))
     return removed
 
@@ -136,7 +167,7 @@ async def lifespan(_: FastAPI):
         cleanup_thread.join(timeout=2)
 
 
-app = FastAPI(title="PublishSafe API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="PublishSafe API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -193,6 +224,69 @@ def _write_private_image(path: Path, image) -> None:
     if not cv2.imwrite(str(path), image):
         raise RuntimeError("Could not write a private preview image")
     secure_file(path)
+
+
+def _preview_people(video_id: str) -> list[dict]:
+    try:
+        people = load_preview_manifest(video_id)
+    except PreviewManifestError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Preview selection data is unavailable; upload the video again",
+        ) from exc
+    if not people:
+        raise HTTPException(
+            status_code=409,
+            detail="No selectable person was found in the upload preview",
+        )
+    return people
+
+
+def _selected_preview_person(video_id: str, selected_track_id: int) -> dict:
+    selected = next(
+        (
+            person
+            for person in _preview_people(video_id)
+            if person["track_id"] == selected_track_id
+        ),
+        None,
+    )
+    if selected is None:
+        raise HTTPException(
+            status_code=409,
+            detail="The selected person is not present in the server preview",
+        )
+    return selected
+
+
+def _creator_appearance_anchor(video_id: str, selected_track_id: int) -> np.ndarray:
+    selected = _selected_preview_person(video_id, selected_track_id)
+    try:
+        preview_path = resolve_private_preview_frame(video_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="The upload preview is unavailable; upload the video again",
+        ) from exc
+    frame = cv2.imread(str(preview_path))
+    if frame is None:
+        raise HTTPException(
+            status_code=409,
+            detail="The upload preview is unreadable; upload the video again",
+        )
+    anchor = appearance_histogram(frame, tuple(selected["bbox"]))
+    if anchor is None:
+        raise HTTPException(
+            status_code=409,
+            detail="A reliable creator reference could not be derived; choose another video",
+        )
+    normalized = np.asarray(anchor, dtype=np.float32).reshape(-1)
+    if normalized.size == 0 or not np.all(np.isfinite(normalized)):
+        raise HTTPException(
+            status_code=409,
+            detail="A reliable creator reference could not be derived; choose another video",
+        )
+    return normalized.copy()
 
 
 def _public_job(job: dict) -> dict:
@@ -292,6 +386,15 @@ async def upload_video(file: UploadFile = File(...)) -> UploadResponse:
         preview = draw_preview(frame, people_data)
         preview_path = session_directory / "detected_preview.jpg"
         _write_private_image(preview_path, preview)
+        manifest_people = [
+            {
+                "track_id": track_id,
+                "bbox": list(bbox),
+                "confidence": confidence,
+            }
+            for track_id, bbox, confidence in people_data
+        ]
+        write_preview_manifest(video_id, manifest_people)
 
         return UploadResponse(
             video_id=video_id,
@@ -301,10 +404,7 @@ async def upload_video(file: UploadFile = File(...)) -> UploadResponse:
             expires_at=expires_at,
             filename=file.filename or destination.name,
             preview_url=_media_url(video_id, "detected-preview"),
-            people=[
-                {"track_id": track_id, "bbox": list(bbox), "confidence": confidence}
-                for track_id, bbox, confidence in people_data
-            ],
+            people=manifest_people,
             width=width,
             height=height,
             fps=fps,
@@ -329,6 +429,15 @@ def create_frame_preview(
     authorization: str | None = Header(default=None),
 ) -> FramePreviewResponse:
     _require_session(request.video_id, authorization)
+    preview_people = _preview_people(request.video_id)
+    if not any(
+        person["track_id"] == request.selected_track_id
+        for person in preview_people
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="The selected person is not present in the server preview",
+        )
     session_directory = upload_session_dir(request.video_id)
     raw_preview_path = session_directory / "raw_preview.jpg"
     frame = cv2.imread(str(raw_preview_path))
@@ -348,14 +457,14 @@ def create_frame_preview(
             raise HTTPException(status_code=422, detail="Could not read the preview frame")
         _write_private_image(raw_preview_path, frame)
 
-    for person in request.people:
-        if person.track_id == request.selected_track_id:
+    for person in preview_people:
+        if person["track_id"] == request.selected_track_id:
             continue
-        mask_path = session_directory / f"preview_mask_{person.track_id}.png"
+        mask_path = session_directory / f"preview_mask_{person['track_id']}.png"
         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
         if mask is not None:
             mask = (mask > 127).astype("uint8")
-        blur_person(frame, tuple(person.bbox), request.blur_strength, mask)
+        blur_person(frame, tuple(person["bbox"]), request.blur_strength, mask)
 
     output_path = session_directory / "frame_preview.jpg"
     try:
@@ -380,6 +489,9 @@ def start_processing(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    creator_appearance = _creator_appearance_anchor(
+        request.video_id, request.selected_track_id
+    )
     job_id = create_job(
         request.video_id,
         request.process_scope,
@@ -398,10 +510,12 @@ def start_processing(
                 request.process_scope,
                 detector,
                 request.audio_policy,
+                creator_appearance=creator_appearance,
             )
         # DELETE is immediate from the caller's perspective. If it races an
         # already-open decoder, remove anything the worker recreated afterward.
         if not session_exists(request.video_id):
+            cancel_video_jobs(request.video_id, drop_records=True)
             delete_video_media(request.video_id)
 
     background_tasks.add_task(locked_process)
@@ -438,17 +552,35 @@ def delete_video(
     authorization: str | None = Header(default=None),
 ) -> Response:
     _require_session(video_id, authorization)
+    cancel_video_jobs(video_id, drop_records=True)
     delete_video_media(video_id)
-    with jobs_lock:
-        for job_id in [
-            key for key, job in jobs.items() if job.get("video_id") == video_id
-        ]:
-            jobs.pop(job_id, None)
     return Response(status_code=204)
 
 
+@app.get(
+    "/api/videos/{video_id}/preview-capability",
+    response_model=FramePreviewResponse,
+)
+def refresh_preview_capability(
+    video_id: str = ApiPath(pattern=r"^[a-f0-9]{32}$"),
+    variant: str = Query(pattern=r"^(detected|frame)$"),
+    authorization: str | None = Header(default=None),
+) -> FramePreviewResponse:
+    _require_session(video_id, authorization)
+    artifact, filename = (
+        ("detected-preview", "detected_preview.jpg")
+        if variant == "detected"
+        else ("frame-preview", "frame_preview.jpg")
+    )
+    try:
+        resolve_preview(video_id, filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Preview was not found") from exc
+    return FramePreviewResponse(preview_url=_media_url(video_id, artifact))
+
+
 @app.get("/api/media/{capability}")
-def get_private_media(capability: str) -> FileResponse:
+def get_private_media(capability: str, download: bool = False) -> FileResponse:
     try:
         claims = verify_capability(capability, "media")
     except CapabilityError as exc:
@@ -473,14 +605,19 @@ def get_private_media(capability: str) -> FileResponse:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Media was not found") from exc
 
-    return FileResponse(
-        media_path,
-        media_type=media_type,
-        headers={
+    response_kwargs = {
+        "media_type": media_type,
+        "headers": {
             "Cache-Control": "private, no-store, max-age=0",
             "Pragma": "no-cache",
             "Expires": "0",
             "Referrer-Policy": "no-referrer",
             "X-Content-Type-Options": "nosniff",
         },
-    )
+    }
+    if artifact == "output" and download:
+        response_kwargs.update(
+            filename="publishsafe-output.mp4",
+            content_disposition_type="attachment",
+        )
+    return FileResponse(media_path, **response_kwargs)
